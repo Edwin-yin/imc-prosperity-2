@@ -1,1 +1,6 @@
 *.log
+*.csv
+*.iml
+*.xml
+*.pyc
+*.txt
