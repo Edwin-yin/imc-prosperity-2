@@ -25,18 +25,18 @@ PARAMS = {
         "soft_position_limit": 50,
     },
     
-    Product.SQUID_INK: {
-        "take_width": 2,
-        "clear_width": 0,
-        "clear_threshold": 0,
-        "prevent_adverse": True,
-        "adverse_volume": 15,
-        "reversion_beta": -0.2,
-        "disregard_edge": 1,
-        "join_edge": 2,
-        "default_edge": 4,
-        "soft_position_limit": 15,
-    },
+    # Product.SQUID_INK: {
+    #     "take_width": 2,
+    #     "clear_width": 0,
+    #     "clear_threshold": 0,
+    #     "prevent_adverse": True,
+    #     "adverse_volume": 15,
+    #     "reversion_beta": -0.2,
+    #     "disregard_edge": 1,
+    #     "join_edge": 2,
+    #     "default_edge": 4,
+    #     "soft_position_limit": 15,
+    # },
     
     Product.KELP: {
         "take_width": 1,
