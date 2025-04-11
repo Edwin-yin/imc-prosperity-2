@@ -31,12 +31,8 @@ class Backtester:
         timestamp_group_md = self.market_data.groupby('timestamp')
         timestamp_group_th = self.trade_history.groupby('timestamp')
         
-        own_trades = defaultdict(list)
-        market_trades = defaultdict(list)
-        pnl_product = defaultdict(float)
         
         trade_history_dict = {}
-        
         for timestamp, group in timestamp_group_th:
             trades = []
             for _, row in group.iterrows():
@@ -45,7 +41,6 @@ class Backtester:
                 quantity = row['quantity']
                 buyer = row['buyer'] if pd.notnull(row['buyer']) else ""
                 seller = row['seller'] if pd.notnull(row['seller']) else ""
-
                 
                 trade = Trade(symbol, int(price), int(quantity), buyer, seller, timestamp)
                 
@@ -54,12 +49,19 @@ class Backtester:
         
         
         for timestamp, group in timestamp_group_md:
+            own_trades = defaultdict(list)
+            market_trades = defaultdict(list)
+            pnl_product = defaultdict(float)
+            
             order_depths = self._construct_order_depths(group)
             order_depths_matching = self._construct_order_depths(group)
             order_depths_pnl = self._construct_order_depths(group)
+            
             state = self._construct_trading_state(traderData, timestamp, self.listings, order_depths, 
                                  dict(own_trades), dict(market_trades), self.current_position, self.observations)
+            
             orders, conversions, traderData = self.trader.run(state)
+            
             products = group['product'].tolist()
             sandboxLog = ""
             trades_at_timestamp = trade_history_dict.get(timestamp, [])
@@ -67,12 +69,15 @@ class Backtester:
             for product in products:
                 new_trades = []
                 for order in orders.get(product, []):
-                    trades_done, sandboxLog = self._execute_order(timestamp, order, order_depths_matching, self.current_position, self.cash, trade_history_dict, sandboxLog)
-                    new_trades.extend(trades_done)
+                    executed_orders = self._execute_order(timestamp, order, order_depths_matching, self.current_position, self.cash, trade_history_dict, sandboxLog)
+                    if len(executed_orders) > 0:
+                        trades_done, sandboxLog = executed_orders
+                        new_trades.extend(trades_done)
                 if len(new_trades) > 0:
                     own_trades[product] = new_trades
+                    
             self.sandbox_logs.append({"sandboxLog": sandboxLog, "lambdaLog": "", "timestamp": timestamp})
-
+            
             trades_at_timestamp = trade_history_dict.get(timestamp, [])
             if trades_at_timestamp:
                 for trade in trades_at_timestamp:
@@ -81,11 +86,11 @@ class Backtester:
             else: 
                 for product in products:
                     market_trades[product] = []
-
             
             for product in products:
                 self._mark_pnl(self.cash, self.current_position, order_depths_pnl, self.pnl, product)
                 self.pnl_history.append(self.pnl[product])
+                
             self._add_trades(own_trades, market_trades)
         return self._log_trades(self.file_name)
     
@@ -255,7 +260,6 @@ class Backtester:
     def _execute_order(self, timestamp, order, order_depths, position, cash, trades_at_timestamp, sandboxLog):
         if order.quantity == 0:
             return []
-        
         order_depth = order_depths[order.symbol]
         if order.quantity > 0:
             return self._execute_buy_order(timestamp, order, order_depths, position, cash, trades_at_timestamp, sandboxLog)
@@ -272,6 +276,76 @@ class Backtester:
         if product in self.fair_marks:
             get_fair = self.fair_marks[product]
             fair = get_fair(order_depth)
-        
         pnl[product] = cash[product] + fair * position[product]
-        
+
+
+if __name__ == '__main__':
+    from round_2_new import Trader
+
+
+    def calculate_SQUID_INK_fair(order_depth):
+        # assumes order_depth has orders in it
+        best_ask = min(order_depth.sell_orders.keys())
+        best_bid = max(order_depth.buy_orders.keys())
+        filtered_ask = [price for price in order_depth.sell_orders.keys() if abs(order_depth.sell_orders[price]) >= 15]
+        filtered_bid = [price for price in order_depth.buy_orders.keys() if abs(order_depth.buy_orders[price]) >= 15]
+        mm_ask = min(filtered_ask) if len(filtered_ask) > 0 else best_ask
+        mm_bid = max(filtered_bid) if len(filtered_bid) > 0 else best_bid
+
+        mmmid_price = (mm_ask + mm_bid) / 2
+        return mmmid_price
+
+
+    def calculate_RAINFOREST_RESIN_fair(order_depth):
+        return 10000
+    listings = {
+        'RAINFOREST_RESIN': Listing(symbol='RAINFOREST_RESIN', product='RAINFOREST_RESIN', denomination='SEASHELLS'),
+        'SQUID_INK': Listing(symbol='SQUID_INK', product='SQUID_INK', denomination='SEASHELLS'),
+        'KELP': Listing(symbol='KELP', product='KELP', denomination='SEASHELLS'),
+        'CROISSANTS': Listing(symbol='CROISSANTS', product='CROISSANTS', denomination='SEASHELLS'),
+        'JAMS': Listing(symbol='JAMS', product='JAMS', denomination='SEASHELLS'),
+        'ROSES': Listing(symbol='ROSES', product='ROSES', denomination='SEASHELLS'),
+        'DJEMBES': Listing(symbol='DJEMBES', product='DJEMBES', denomination='SEASHELLS'),
+        'PICNIC_BASKET1': Listing(symbol='PICNIC_BASKET1', product='PICNIC_BASKET1', denomination='SEASHELLS'),
+        'PICNIC_BASKET2': Listing(symbol='PICNIC_BASKET2', product='PICNIC_BASKET2', denomination='SEASHELLS'),
+    }
+
+    position_limit = {
+        'RAINFOREST_RESIN': 50,
+        'SQUID_INK': 50,
+        'KELP': 50,
+        'CROISSANTS': 250,
+        'JAMS': 350,
+        'DJEMBES': 60,
+        'PICNIC_BASKET1': 60,
+        'PICNIC_BASKET2': 100
+    }
+
+    fair_calculations = {
+        "RAINFOREST_RESIN": calculate_RAINFOREST_RESIN_fair,
+        "SQUID_INK": calculate_SQUID_INK_fair
+    }
+    # run
+    day = 0
+    market_data = pd.read_csv(f"./round-2-island-data-bottle/prices_round_2_day_{day}.csv", sep=";", header=0)
+    trade_history = pd.read_csv(f"./round-2-island-data-bottle/trades_round_2_day_{day}.csv", sep=";", header=0)
+    import io
+    def _process_data_(file):
+        with open(file, 'r') as file:
+            log_content = file.read()
+        sections = log_content.split('Sandbox logs:')[1].split('Activities log:')
+        sandbox_log = sections[0].strip()
+        activities_log = sections[1].split('Trade History:')[0]
+        # sandbox_log_list = [json.loads(line) for line in sandbox_log.split('\n')]
+        trade_history = json.loads(sections[1].split('Trade History:')[1])
+        # sandbox_log_df = pd.DataFrame(sandbox_log_list)
+        market_data_df = pd.read_csv(io.StringIO(activities_log), sep=";", header=0)
+        trade_history_df = pd.json_normalize(trade_history)
+        # print(sections[1])
+        return market_data_df, trade_history_df
+    #market_data, trade_history = _process_data_('./logs/roun1_0.log')
+    trader = Trader()
+    backtester = Backtester(trader, listings, position_limit, fair_calculations, market_data, trade_history,
+                            "trade_history_sim.log")
+    backtester.run()
+    print(backtester.pnl)
