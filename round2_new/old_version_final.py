@@ -39,17 +39,17 @@ PARAMS = {
     # },
     
     Product.KELP: {
-        "take_width": 1,
+        "take_width": 0.5,   
         "clear_width": 0,
-        "clear_threshold": 0,
+        "clear_threshold": 10,  
         "prevent_adverse": True,
         "adverse_volume": 15,
         "reversion_beta": -0.271, # -0.293 for weighted
         "imb_beta": 0,
         "disregard_edge": 1,
-        "join_edge": 0,
-        "default_edge": 1,
-        "soft_position_limit": 50,
+        "join_edge": 1,  # larger join edge lead to less pnl: We need to put aggressive orders
+        "default_edge": 2, # no effect
+        "soft_position_limit": 50,  # no effect
     },
 }
 
