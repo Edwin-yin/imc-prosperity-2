@@ -280,10 +280,22 @@ class Backtester:
 
 
 if __name__ == '__main__':
-    from round_2_new import Trader
+    from round_2_new_merge import Trader
 
 
     def calculate_SQUID_INK_fair(order_depth):
+        # assumes order_depth has orders in it
+        best_ask = min(order_depth.sell_orders.keys())
+        best_bid = max(order_depth.buy_orders.keys())
+        filtered_ask = [price for price in order_depth.sell_orders.keys() if abs(order_depth.sell_orders[price]) >= 15]
+        filtered_bid = [price for price in order_depth.buy_orders.keys() if abs(order_depth.buy_orders[price]) >= 15]
+        mm_ask = min(filtered_ask) if len(filtered_ask) > 0 else best_ask
+        mm_bid = max(filtered_bid) if len(filtered_bid) > 0 else best_bid
+
+        mmmid_price = (mm_ask + mm_bid) / 2
+        return mmmid_price
+    
+    def calculate_KELP_fair(order_depth):
         # assumes order_depth has orders in it
         best_ask = min(order_depth.sell_orders.keys())
         best_bid = max(order_depth.buy_orders.keys())
@@ -323,7 +335,8 @@ if __name__ == '__main__':
 
     fair_calculations = {
         "RAINFOREST_RESIN": calculate_RAINFOREST_RESIN_fair,
-        "SQUID_INK": calculate_SQUID_INK_fair
+        "SQUID_INK": calculate_SQUID_INK_fair,
+        "KELP": calculate_KELP_fair,
     }
     # run
     day = 0
