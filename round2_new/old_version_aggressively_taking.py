@@ -16,7 +16,7 @@ PARAMS = {
     Product.RAINFOREST_RESIN: {
         "fair_value": 10000,
         "take_width": 1,
-        "clear_threshold": 30,
+        "clear_threshold": 30, # No clear orders triggered in the online backtesting.
         "clear_width": 0,
         # for making
         "disregard_edge": 0,  # disregards orders for joining or pennying within this value from fair
@@ -84,7 +84,7 @@ class Trader:
 
             # Check adverse condition for sell orders
             if not prevent_adverse or abs(best_ask_amount) <= adverse_volume:
-                if best_ask <= fair_value - take_width:
+                if best_ask <= fair_value - take_width or (best_ask <= fair_value and position < 0): # Aggressively taking when having position
                     quantity = min(
                         best_ask_amount, position_limit - position
                     )  # max amt to buy
@@ -102,7 +102,7 @@ class Trader:
 
             # Check adverse condition for buy orders
             if not prevent_adverse or abs(best_bid_amount) <= adverse_volume:
-                if best_bid >= fair_value + take_width:
+                if best_bid >= fair_value + take_width or (best_bid >= fair_value and position > 0): # Aggressively taking when having position
                     quantity = min(
                         best_bid_amount, position_limit + position
                     )  # should be the max we can sell
@@ -412,8 +412,10 @@ class Trader:
                 if Product.RAINFOREST_RESIN in state.position
                 else 0
             )
+        
             if resin_position >= self.LIMIT[Product.RAINFOREST_RESIN]:
                 print(f"Resin position limit reached at time {state.timestamp}. Current postiion: {resin_position}")
+                
             resin_take_orders, buy_order_volume, sell_order_volume = (
                 self.take_orders(
                     Product.RAINFOREST_RESIN,
