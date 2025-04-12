@@ -66,15 +66,16 @@ PARAMS = {
         "target_position": 58,}
 }
 
-BASKET1_WEIGHTS = {
+PICNIC_BASKET1_WEIGHTS = {
     Product.CROISSANTS: 6,
     Product.JAMS: 3,
     Product.DJEMBES: 1,
 }
 
-BASKET2_WEIGHTS = {
+PICNIC_BASKET2_WEIGHTS = {
     Product.CROISSANTS: 4,
     Product.JAMS: 2,
+    Product.DJEMBES: 0,
 }
 
 
@@ -433,12 +434,12 @@ class Trader:
         )
 
     def get_synthetic_basket_order_depth(
-        self, order_depths: Dict[str, OrderDepth]
+        self, order_depths: Dict[str, OrderDepth], product: str
     ) -> OrderDepth:
         # Constants
-        CROISSANT_PER_BASKET = BASKET1_WEIGHTS[Product.CROISSANTS]
-        JAMS_PER_BASKET = BASKET1_WEIGHTS[Product.JAMS]
-        DJEMBES_PER_BASKET = BASKET1_WEIGHTS[Product.DJEMBES]
+        CROISSANT_PER_BASKET = eval(f'{product}_WEIGHTS[Product.CROISSANTS]')
+        JAMS_PER_BASKET = eval(f'{product}_WEIGHTS[Product.JAMS]')
+        DJEMBES_PER_BASKET = eval(f'{product}_WEIGHTS[Product.DJEMBES]')
 
         # Initialize the synthetic basket order depth
         synthetic_order_price = OrderDepth()
@@ -497,10 +498,13 @@ class Trader:
                 order_depths[Product.JAMS].buy_orders[JAMS_best_bid]
                 // JAMS_PER_BASKET
             )
-            DJEMBES_bid_volume = (
-                order_depths[Product.DJEMBES].buy_orders[DJEMBES_best_bid]
-                // DJEMBES_PER_BASKET
-            )
+            if DJEMBES_PER_BASKET == 0:
+                DJEMBES_bid_volume = 10**5
+            else:
+                DJEMBES_bid_volume = (
+                    order_depths[Product.DJEMBES].buy_orders[DJEMBES_best_bid]
+                    // DJEMBES_PER_BASKET
+                )
             implied_bid_volume = min(
                 CROISSANT_bid_volume, JAMS_bid_volume, DJEMBES_bid_volume
             )
@@ -515,10 +519,13 @@ class Trader:
                 -order_depths[Product.JAMS].sell_orders[JAMS_best_ask]
                 // JAMS_PER_BASKET
             )
-            DJEMBES_ask_volume = (
-                -order_depths[Product.DJEMBES].sell_orders[DJEMBES_best_ask]
-                // DJEMBES_PER_BASKET
-            )
+            if DJEMBES_PER_BASKET == 0:
+                DJEMBES_ask_volume = 10**5
+            else:
+                DJEMBES_ask_volume = (
+                    -order_depths[Product.DJEMBES].sell_orders[DJEMBES_best_ask]
+                    // DJEMBES_PER_BASKET
+                )
             implied_ask_volume = min(
                 CROISSANT_ask_volume, JAMS_ask_volume, DJEMBES_ask_volume
             )
@@ -527,7 +534,7 @@ class Trader:
         return synthetic_order_price
 
     def convert_synthetic_basket_orders(
-        self, synthetic_orders: List[Order], order_depths: Dict[str, OrderDepth]
+        self, synthetic_orders: List[Order], order_depths: Dict[str, OrderDepth], product: str
     ) -> Dict[str, List[Order]]:
         # Initialize the dictionary to store component orders
         component_orders = {
@@ -538,7 +545,7 @@ class Trader:
 
         # Get the best bid and ask for the synthetic basket
         synthetic_basket_order_depth = self.get_synthetic_basket_order_depth(
-            order_depths
+            order_depths, product
         )
         best_bid = (
             max(synthetic_basket_order_depth.buy_orders.keys())
@@ -582,15 +589,15 @@ class Trader:
             CROISSANT_order = Order(
                 Product.CROISSANTS,
                 CROISSANT_price,
-                quantity * BASKET1_WEIGHTS[Product.CROISSANTS],
+                quantity * PICNIC_BASKET1_WEIGHTS[Product.CROISSANTS],
             )
             JAMS_order = Order(
                 Product.JAMS,
                 JAMS_price,
-                quantity * BASKET1_WEIGHTS[Product.JAMS],
+                quantity * PICNIC_BASKET1_WEIGHTS[Product.JAMS],
             )
             DJEMBES_order = Order(
-                Product.DJEMBES, DJEMBES_price, quantity * BASKET1_WEIGHTS[Product.DJEMBES]
+                Product.DJEMBES, DJEMBES_price, quantity * PICNIC_BASKET1_WEIGHTS[Product.DJEMBES]
             )
 
             # Add the component orders to the respective lists
@@ -605,14 +612,15 @@ class Trader:
         target_position: int,
         basket_position: int,
         order_depths: Dict[str, OrderDepth],
+        product: str
     ):
 
         if target_position == basket_position:
             return None
 
         target_quantity = abs(target_position - basket_position)
-        basket_order_depth = order_depths[Product.PICNIC_BASKET1]
-        synthetic_order_depth = self.get_synthetic_basket_order_depth(order_depths)
+        basket_order_depth = order_depths[product]
+        synthetic_order_depth = self.get_synthetic_basket_order_depth(order_depths, product)
 
         if target_position > basket_position:
             basket_ask_price = min(basket_order_depth.sell_orders.keys())
@@ -627,16 +635,16 @@ class Trader:
             execute_volume = min(orderbook_volume, target_quantity)
 
             basket_orders = [
-                Order(Product.PICNIC_BASKET1, basket_ask_price, execute_volume)
+                Order(product, basket_ask_price, execute_volume)
             ]
             synthetic_orders = [
                 Order(Product.SYNTHETIC, synthetic_bid_price, -execute_volume)
             ]
 
             aggregate_orders = self.convert_synthetic_basket_orders(
-                synthetic_orders, order_depths
+                synthetic_orders, order_depths, product
             )
-            aggregate_orders[Product.PICNIC_BASKET1] = basket_orders
+            aggregate_orders[product] = basket_orders
             return aggregate_orders
 
         else:
@@ -652,7 +660,7 @@ class Trader:
             execute_volume = min(orderbook_volume, target_quantity)
 
             basket_orders = [
-                Order(Product.PICNIC_BASKET1, basket_bid_price, -execute_volume)
+                Order(product, basket_bid_price, -execute_volume)
             ]
             synthetic_orders = [
                 Order(Product.SYNTHETIC, synthetic_ask_price, execute_volume)
@@ -661,7 +669,7 @@ class Trader:
             aggregate_orders = self.convert_synthetic_basket_orders(
                 synthetic_orders, order_depths
             )
-            aggregate_orders[Product.PICNIC_BASKET1] = basket_orders
+            aggregate_orders[product] = basket_orders
             return aggregate_orders
 
     def spread_orders(
@@ -671,11 +679,11 @@ class Trader:
         basket_position: int,
         spread_data: Dict[str, Any],
     ):
-        if Product.PICNIC_BASKET1 not in order_depths.keys():
+        if product not in order_depths.keys():
             return None
 
-        basket_order_depth = order_depths[Product.PICNIC_BASKET1]
-        synthetic_order_depth = self.get_synthetic_basket_order_depth(order_depths)
+        basket_order_depth = order_depths[product]
+        synthetic_order_depth = self.get_synthetic_basket_order_depth(order_depths, product)
         basket_swmid = self.get_swmid(basket_order_depth)
         synthetic_swmid = self.get_swmid(synthetic_order_depth)
         spread = basket_swmid - synthetic_swmid
@@ -701,6 +709,7 @@ class Trader:
                     -self.params[Product.SPREAD]["target_position"],
                     basket_position,
                     order_depths,
+                    product,
                 )
 
         if zscore <= -self.params[Product.SPREAD]["zscore_threshold"]:
@@ -709,6 +718,61 @@ class Trader:
                     self.params[Product.SPREAD]["target_position"],
                     basket_position,
                     order_depths,
+                    product,
+                )
+
+        spread_data["prev_zscore"] = zscore
+        return None
+
+    def spread_orders_2(
+        self,
+        order_depths: Dict[str, OrderDepth],
+        product_list: List[str],
+        basket_position_list: List[int],
+        spread_data: Dict[str, Any],
+    ):
+        for product in product_list:
+            # TODO: whether we append 0 to spread_data["spread_history"] if product not in order_depths.keys()
+            if product not in order_depths.keys():
+                continue
+                # return None
+            basket_order_depth = order_depths[product]
+            synthetic_order_depth = self.get_synthetic_basket_order_depth(order_depths, product)
+            basket_swmid = self.get_swmid(basket_order_depth)
+            synthetic_swmid = self.get_swmid(synthetic_order_depth)
+            spread = basket_swmid - synthetic_swmid
+            spread_data["spread_history"][product].append(spread)
+
+        if (
+            len(spread_data["spread_history"])
+            < self.params[Product.SPREAD]["spread_std_window"]
+        ):
+            return None
+        elif len(spread_data["spread_history"]) > self.params[Product.SPREAD]["spread_std_window"]:
+            spread_data["spread_history"].pop(0)
+
+        spread_std = np.std(spread_data["spread_history"])
+
+        zscore = (
+            spread - self.params[Product.SPREAD]["default_spread_mean"]
+        ) / spread_std
+
+        if zscore >= self.params[Product.SPREAD]["zscore_threshold"]:
+            if basket_position != -self.params[Product.SPREAD]["target_position"]:
+                return self.execute_spread_orders(
+                    -self.params[Product.SPREAD]["target_position"],
+                    basket_position,
+                    order_depths,
+                    product,
+                )
+
+        if zscore <= -self.params[Product.SPREAD]["zscore_threshold"]:
+            if basket_position != self.params[Product.SPREAD]["target_position"]:
+                return self.execute_spread_orders(
+                    self.params[Product.SPREAD]["target_position"],
+                    basket_position,
+                    order_depths,
+                    product,
                 )
 
         spread_data["prev_zscore"] = zscore
@@ -880,17 +944,28 @@ class Trader:
                 "curr_avg": 0,
             }
 
-        basket_position = (
+        basket1_position = (
             state.position[Product.PICNIC_BASKET1]
             if Product.PICNIC_BASKET1 in state.position
+            else 0
+        )
+        basket2_position = (
+            state.position[Product.PICNIC_BASKET2]
+            if Product.PICNIC_BASKET2 in state.position
             else 0
         )
         spread_orders = self.spread_orders(
             state.order_depths,
             Product.PICNIC_BASKET1,
-            basket_position,
+            basket1_position,
             traderObject[Product.SPREAD],
         )
+        # spread_orders = self.spread_orders_2(
+        #     state.order_depths,
+        #     [Product.PICNIC_BASKET1, Product.PICNIC_BASKET2],
+        #     [basket1_position, basket2_position],
+        #     traderObject[Product.SPREAD],
+        # )
         if spread_orders != None:
             result[Product.CROISSANTS] = spread_orders[Product.CROISSANTS]
             result[Product.JAMS] = spread_orders[Product.JAMS]
