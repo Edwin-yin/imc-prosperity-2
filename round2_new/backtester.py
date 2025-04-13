@@ -22,7 +22,7 @@ class Backtester:
         self.observations = [Observation({}, {}) for _ in range(len(market_data))]
 
         self.current_position = {product: 0 for product in self.listings.keys()}
-        self.pnl_history = []
+        self.pnl_history = {product: [] for product in self.listings.keys()}
         self.pnl = {product: 0 for product in self.listings.keys()}
         self.cash = {product: 0 for product in self.listings.keys()}
         self.trades = []
@@ -99,7 +99,7 @@ class Backtester:
 
                 for product in products:
                     self._mark_pnl(self.cash, self.current_position, order_depths_pnl, self.pnl, product)
-                    self.pnl_history.append(self.pnl[product])
+                    self.pnl_history[product].append(self.pnl[product])
             if self.output_fair:
                 for product in self.listings.keys():
                     if self.pnl[product] != 0:
@@ -151,7 +151,7 @@ class Backtester:
 
                 for product in products:
                     self._mark_pnl(self.cash, self.current_position, order_depths_pnl, self.pnl, product)
-                    self.pnl_history.append(self.pnl[product])
+                    self.pnl_history[product].append(self.pnl[product])
 
                 self._add_trades(own_trades, market_trades)
         return self._log_trades(self.file_name)
@@ -160,8 +160,8 @@ class Backtester:
     def _log_trades(self, filename: str = None):
         if filename is None:
             return 
-
-        self.market_data['profit_and_loss'] = self.pnl_history
+        # FIXME: profit and loss has not been calculated yet
+        # self.market_data['profit_and_loss'] = self.pnl_history
 
         output = ""
         output += "Sandbox logs:\n"
@@ -342,7 +342,7 @@ class Backtester:
 
 
 if __name__ == '__main__':
-    from old_version_aggressively_taking_timestamp import Trader
+    from round_2_ink import Trader
 
 
     def calculate_SQUID_INK_fair(order_depth):
@@ -387,26 +387,28 @@ if __name__ == '__main__':
         "SQUID_INK": calculate_SQUID_INK_fair
     }
     # run
-    day = 0
-    #market_data = pd.read_csv(f"./round-2-island-data-bottle/prices_round_2_day_{day}.csv", sep=";", header=0)
-    #trade_history = pd.read_csv(f"./round-2-island-data-bottle/trades_round_2_day_{day}.csv", sep=";", header=0)
-    import io
-    def _process_data_(file):
-        with open(file, 'r') as file:
-            log_content = file.read()
-        sections = log_content.split('Sandbox logs:')[1].split('Activities log:')
-        sandbox_log = sections[0].strip()
-        activities_log = sections[1].split('Trade History:')[0]
-        # sandbox_log_list = [json.loads(line) for line in sandbox_log.split('\n')]
-        trade_history = json.loads(sections[1].split('Trade History:')[1])
-        # sandbox_log_df = pd.DataFrame(sandbox_log_list)
-        market_data_df = pd.read_csv(io.StringIO(activities_log), sep=";", header=0)
-        trade_history_df = pd.json_normalize(trade_history)
-        # print(sections[1])
-        return market_data_df, trade_history_df
-    market_data, trade_history = _process_data_('./webruns/aggress_time.log')
-    trader = Trader()
-    backtester = Backtester(trader, listings, position_limit, fair_calculations, market_data, trade_history,
-                            "trade_history_sim.log", False, 'fair2')
-    backtester.run()
-    print(backtester.pnl)
+    for day in [-1,0,1]:
+    #day = -1
+        market_data = pd.read_csv(f"./round-2-island-data-bottle/prices_round_2_day_{day}.csv", sep=";", header=0)
+        trade_history = pd.read_csv(f"./round-2-island-data-bottle/trades_round_2_day_{day}.csv", sep=";", header=0)
+        import io
+        def _process_data_(file):
+            with open(file, 'r') as file:
+                log_content = file.read()
+            sections = log_content.split('Sandbox logs:')[1].split('Activities log:')
+            sandbox_log = sections[0].strip()
+            activities_log = sections[1].split('Trade History:')[0]
+            # sandbox_log_list = [json.loads(line) for line in sandbox_log.split('\n')]
+            trade_history = json.loads(sections[1].split('Trade History:')[1])
+            # sandbox_log_df = pd.DataFrame(sandbox_log_list)
+            market_data_df = pd.read_csv(io.StringIO(activities_log), sep=";", header=0)
+            trade_history_df = pd.json_normalize(trade_history)
+            # print(sections[1])
+            return market_data_df, trade_history_df
+        # market_data, trade_history = _process_data_('./webruns/aggress_time.log')
+        # market_data, trade_history = _process_data_('./webruns/null_strategy.log')
+        trader = Trader()
+        backtester = Backtester(trader, listings, position_limit, fair_calculations, market_data, trade_history,
+                                "trade_history_sim.log", False, None)
+        backtester.run()
+        print(backtester.pnl)
