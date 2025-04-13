@@ -86,7 +86,7 @@ PARAMS = {
         "default_spread_mean": 0,
         "default_spread_std": 93,
         "spread_std_window": 45,
-        "zscore_threshold": 1,
+        "zscore_threshold": 0.8,
         "target_position": 5,
     },
 }
@@ -552,7 +552,7 @@ class Trader:
         for component, quantity in eval(f'{product}_WEIGHTS').items():
             component_orders[component] = Order(
                 component,
-                bid_take_price[component] if synthetic_order.quantity > 0 else ask_take_price[component],
+                ask_take_price[component] if synthetic_order.quantity > 0 else bid_take_price[component],
                 quantity * synthetic_order.quantity,
             )
         return component_orders
@@ -571,6 +571,7 @@ class Trader:
     ):
         synthetic_product = SYNTHETIC[product]
         if target_position == basket_position:
+            print(f'Target position {target_position} for {product} already reached.')
             return None
 
         target_quantity = abs(target_position - basket_position)
@@ -660,9 +661,9 @@ class Trader:
         zscore = (
             spread - self.params[spread_product]["default_spread_mean"]
         ) / spread_std
-
+        spread_data["prev_zscore"] = zscore
         if zscore >= self.params[spread_product]["zscore_threshold"]:
-            if basket_position != -self.params[spread_product]["target_position"]:
+            if basket_position > -self.params[spread_product]["target_position"]:
                 return self.execute_spread_orders(
                     -self.params[spread_product]["target_position"],
                     basket_position,
@@ -676,7 +677,7 @@ class Trader:
                 )
 
         if zscore <= -self.params[spread_product]["zscore_threshold"]:
-            if basket_position != self.params[spread_product]["target_position"]:
+            if basket_position < self.params[spread_product]["target_position"]:
                 return self.execute_spread_orders(
                     self.params[spread_product]["target_position"],
                     basket_position,
@@ -688,7 +689,6 @@ class Trader:
                     synthetic_ask_take,
                     product,
                 )
-        spread_data["prev_zscore"] = zscore
         return None
 
     
@@ -872,7 +872,13 @@ class Trader:
                     if product not in result.keys():
                         result[product] = []
                     result[product].append(order)
-
+                print(result)
+                print(state.order_depths[Product.PICNIC_BASKET1].buy_orders)
+                print(state.order_depths[Product.PICNIC_BASKET2].buy_orders)
+                print(state.order_depths[Product.DJEMBES].buy_orders)
+                print(state.order_depths[Product.PICNIC_BASKET1].sell_orders)
+                print(state.order_depths[Product.PICNIC_BASKET2].sell_orders)
+                print(state.order_depths[Product.DJEMBES].sell_orders)
         conversions = 1
         traderData = jsonpickle.encode(traderObject)
         # traderData = None
