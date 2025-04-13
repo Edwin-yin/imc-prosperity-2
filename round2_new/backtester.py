@@ -1,13 +1,16 @@
+import copy
 from typing import Dict, List, Any
 import pandas as pd
 import json
 from collections import defaultdict
+import numpy as np
 from datamodel import TradingState, Listing, OrderDepth, Trade, Observation, Order, UserId
 
 
 class Backtester:
     def __init__(self, trader, listings: Dict[str, Listing], position_limit: Dict[str, int], fair_marks, 
-                 market_data: pd.DataFrame, trade_history: pd.DataFrame, file_name: str = None):
+                 market_data: pd.DataFrame, trade_history: pd.DataFrame, file_name: str = None,
+                 do_verification: bool =False, output_fair: str = None):
         self.trader = trader
         self.listings = listings
         self.market_data = market_data
@@ -19,87 +22,146 @@ class Backtester:
         self.observations = [Observation({}, {}) for _ in range(len(market_data))]
 
         self.current_position = {product: 0 for product in self.listings.keys()}
-        self.pnl_history = []
+        self.pnl_history = {product: [] for product in self.listings.keys()}
         self.pnl = {product: 0 for product in self.listings.keys()}
         self.cash = {product: 0 for product in self.listings.keys()}
         self.trades = []
         self.sandbox_logs = []
+        self.do_verification = do_verification
+        self.output_fair = output_fair
+        self.fair_price_history = {product: [] for product in self.listings.keys()}
         
     def run(self):
+
         traderData = ""
         
         timestamp_group_md = self.market_data.groupby('timestamp')
         timestamp_group_th = self.trade_history.groupby('timestamp')
         
-        
-        trade_history_dict = {}
+        mode = 'empty'  # The empty version is used
+        self_trade_history_dict = {}
+        bot_trade_history_dict = {}
         for timestamp, group in timestamp_group_th:
-            trades = []
+            bot_trades = []
+            self_trades = []
             for _, row in group.iterrows():
                 symbol = row['symbol']
                 price = row['price']
                 quantity = row['quantity']
                 buyer = row['buyer'] if pd.notnull(row['buyer']) else ""
                 seller = row['seller'] if pd.notnull(row['seller']) else ""
-                
                 trade = Trade(symbol, int(price), int(quantity), buyer, seller, timestamp)
-                
-                trades.append(trade)
-            trade_history_dict[timestamp] = trades
-        
-        
-        for timestamp, group in timestamp_group_md:
-            own_trades = defaultdict(list)
-            market_trades = defaultdict(list)
-            pnl_product = defaultdict(float)
-            
-            order_depths = self._construct_order_depths(group)
-            order_depths_matching = self._construct_order_depths(group)
-            order_depths_pnl = self._construct_order_depths(group)
-            
-            state = self._construct_trading_state(traderData, timestamp, self.listings, order_depths, 
-                                 dict(own_trades), dict(market_trades), self.current_position, self.observations)
-            
-            orders, conversions, traderData = self.trader.run(state)
-            
-            products = group['product'].tolist()
-            sandboxLog = ""
-            trades_at_timestamp = trade_history_dict.get(timestamp, [])
+                if buyer != 'SUBMISSION' and seller != 'SUBMISSION':
+                    bot_trades.append(trade)
+                else:
+                    mode = 'webruns'
+                    self_trades.append(trade)
+            self_trade_history_dict[timestamp] = self_trades
+            bot_trade_history_dict[timestamp] = bot_trades
 
-            for product in products:
-                new_trades = []
-                for order in orders.get(product, []):
-                    executed_orders = self._execute_order(timestamp, order, order_depths_matching, self.current_position, self.cash, trade_history_dict, sandboxLog)
-                    if len(executed_orders) > 0:
-                        trades_done, sandboxLog = executed_orders
-                        new_trades.extend(trades_done)
-                if len(new_trades) > 0:
-                    own_trades[product] = new_trades
-                    
-            self.sandbox_logs.append({"sandboxLog": sandboxLog, "lambdaLog": "", "timestamp": timestamp})
-            
-            trades_at_timestamp = trade_history_dict.get(timestamp, [])
-            if trades_at_timestamp:
-                for trade in trades_at_timestamp:
+        if mode == 'webruns':
+            if self.output_fair:
+                self.fair_price_history = {product: [0]*len(timestamp_group_md) for product in self.listings.keys()}
+            for timestamp, group in timestamp_group_md:
+                products = group['product'].tolist()
+                order_depths_pnl = self._construct_order_depths(group)
+                self_trades = self_trade_history_dict.get(timestamp, [])
+                sandboxLog = ""
+                if self.do_verification or self.output_fair:
+                    for product in products:
+                        self._mark_pnl(self.cash, self.current_position, order_depths_pnl, self.pnl, product)
+                        self_compute_pnl = self.pnl[product]
+                        web_pnl = float(group['profit_and_loss'][group['product'] == product].values)
+                        if self.do_verification:
+                            assert self_compute_pnl == web_pnl
+                        if self.output_fair:
+                            if self.current_position[product] != 0:
+                                web_fair_value = (web_pnl - self.cash[product]) / self.current_position[product]
+                                self.fair_price_history[product][int(timestamp/100)] = web_fair_value
+                            else:
+                                self.fair_price_history[product][int(timestamp/100)] = np.nan
+                for trade in self_trades:
+                    trade_volume = trade.quantity
                     product = trade.symbol
-                    market_trades[product].append(trade)
-            else: 
+                    price = trade.price
+                    if trade.buyer == 'SUBMISSION':
+                        if abs(trade_volume + self.current_position[product]) <= int(self.position_limit[product]):
+                            self.current_position[product] += trade_volume
+                            self.cash[product] -= price * trade_volume
+                        else:
+                            sandboxLog += f"\nOrders for product {product} exceeded limit of {self.position_limit[product]} set"
+                    else:
+                        if abs(trade_volume + self.current_position[product]) <= int(self.position_limit[product]):
+                            self.current_position[product] -= trade_volume
+                            self.cash[product] += price * trade_volume
+                        else:
+                            sandboxLog += f"\nOrders for product {product} exceeded limit of {self.position_limit[product]} set"
+
                 for product in products:
-                    market_trades[product] = []
+                    self._mark_pnl(self.cash, self.current_position, order_depths_pnl, self.pnl, product)
+                    self.pnl_history[product].append(self.pnl[product])
+            if self.output_fair:
+                for product in self.listings.keys():
+                    if self.pnl[product] != 0:
+                        product_df = copy.deepcopy(self.market_data[self.market_data['product'] == product].reset_index(drop=True))
+                        product_df.loc[:, 'fair_price'] = self.fair_price_history[product]
+                        product_df.to_csv(f'{self.output_fair}_{product}.csv', index=False)
+
+
+                # self._add_trades(own_trades, market_trades)
+        else:
+            for timestamp, group in timestamp_group_md:
+                own_trades = defaultdict(list)
+                market_trades = defaultdict(list)
+                pnl_product = defaultdict(float)
+
+                order_depths = self._construct_order_depths(group)
+                order_depths_matching = self._construct_order_depths(group)
+                order_depths_pnl = self._construct_order_depths(group)
+
+                state = self._construct_trading_state(traderData, timestamp, self.listings, order_depths,
+                                     dict(own_trades), dict(market_trades), self.current_position, self.observations)
+
+                orders, conversions, traderData = self.trader.run(state)
+
+                products = group['product'].tolist()
+                sandboxLog = ""
+                trades_at_timestamp = bot_trade_history_dict.get(timestamp, [])
+
+                for product in products:
+                    new_trades = []
+                    for order in orders.get(product, []):
+                        executed_orders = self._execute_order(timestamp, order, order_depths_matching, self.current_position, self.cash, bot_trade_history_dict, sandboxLog)
+                        if len(executed_orders) > 0:
+                            trades_done, sandboxLog = executed_orders
+                            new_trades.extend(trades_done)
+                    if len(new_trades) > 0:
+                        own_trades[product] = new_trades
+                    
+                self.sandbox_logs.append({"sandboxLog": sandboxLog, "lambdaLog": "", "timestamp": timestamp})
             
-            for product in products:
-                self._mark_pnl(self.cash, self.current_position, order_depths_pnl, self.pnl, product)
-                self.pnl_history.append(self.pnl[product])
-                
-            self._add_trades(own_trades, market_trades)
+                trades_at_timestamp = bot_trade_history_dict.get(timestamp, [])
+                if trades_at_timestamp:
+                    for trade in trades_at_timestamp:
+                        product = trade.symbol
+                        market_trades[product].append(trade)
+                else:
+                    for product in products:
+                        market_trades[product] = []
+
+                for product in products:
+                    self._mark_pnl(self.cash, self.current_position, order_depths_pnl, self.pnl, product)
+                    self.pnl_history[product].append(self.pnl[product])
+
+                self._add_trades(own_trades, market_trades)
         return self._log_trades(self.file_name)
     
     
     def _log_trades(self, filename: str = None):
         if filename is None:
             return 
-
-        self.market_data['profit_and_loss'] = self.pnl_history
+        # FIXME: profit and loss has not been calculated yet
+        # self.market_data['profit_and_loss'] = self.pnl_history
 
         output = ""
         output += "Sandbox logs:\n"
@@ -293,18 +355,6 @@ if __name__ == '__main__':
 
         mmmid_price = (mm_ask + mm_bid) / 2
         return mmmid_price
-    
-    def calculate_KELP_fair(order_depth):
-        # assumes order_depth has orders in it
-        best_ask = min(order_depth.sell_orders.keys())
-        best_bid = max(order_depth.buy_orders.keys())
-        filtered_ask = [price for price in order_depth.sell_orders.keys() if abs(order_depth.sell_orders[price]) >= 15]
-        filtered_bid = [price for price in order_depth.buy_orders.keys() if abs(order_depth.buy_orders[price]) >= 15]
-        mm_ask = min(filtered_ask) if len(filtered_ask) > 0 else best_ask
-        mm_bid = max(filtered_bid) if len(filtered_bid) > 0 else best_bid
-
-        mmmid_price = (mm_ask + mm_bid) / 2
-        return mmmid_price
 
 
     def calculate_RAINFOREST_RESIN_fair(order_depth):
@@ -315,7 +365,6 @@ if __name__ == '__main__':
         'KELP': Listing(symbol='KELP', product='KELP', denomination='SEASHELLS'),
         'CROISSANTS': Listing(symbol='CROISSANTS', product='CROISSANTS', denomination='SEASHELLS'),
         'JAMS': Listing(symbol='JAMS', product='JAMS', denomination='SEASHELLS'),
-        'ROSES': Listing(symbol='ROSES', product='ROSES', denomination='SEASHELLS'),
         'DJEMBES': Listing(symbol='DJEMBES', product='DJEMBES', denomination='SEASHELLS'),
         'PICNIC_BASKET1': Listing(symbol='PICNIC_BASKET1', product='PICNIC_BASKET1', denomination='SEASHELLS'),
         'PICNIC_BASKET2': Listing(symbol='PICNIC_BASKET2', product='PICNIC_BASKET2', denomination='SEASHELLS'),
@@ -334,8 +383,7 @@ if __name__ == '__main__':
 
     fair_calculations = {
         "RAINFOREST_RESIN": calculate_RAINFOREST_RESIN_fair,
-        "SQUID_INK": calculate_SQUID_INK_fair,
-        "KELP": calculate_KELP_fair,
+        "SQUID_INK": calculate_SQUID_INK_fair
     }
     import io
     def _process_data_(file):

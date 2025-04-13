@@ -513,6 +513,7 @@ class Trader:
             price = 0
             take_price = 0
             for i, bid in enumerate(bids[:max_levels]):
+            for i, bid in enumerate(bids[:max_levels]):
                 volume += bid[1]
                 price += bid[0] * bid[1]
                 if volume >= weight:
@@ -522,13 +523,21 @@ class Trader:
                     else: 
                         price -= bid[0] * (volume % weight)
                         volume -= volume % weight
+                    if i > 0:
+                        price -= bid[0] * (volume - weight)
+                        volume = weight
+                    else: 
+                        price -= bid[0] * (volume % weight)
+                        volume -= volume % weight
                     take_price = bid[0]
                     break
+            best_bids[product] = (take_price, price / volume if volume >= weight else np.nan, volume // weight)
             best_bids[product] = (take_price, price / volume if volume >= weight else np.nan, volume // weight)
             asks = sorted(order_depths[product].sell_orders.items(), key=lambda x: x[0])
             volume = 0
             price = 0
             take_price = 0
+            for i, ask in enumerate(asks[:max_levels]):
             for i, ask in enumerate(asks[:max_levels]):
                 volume += abs(ask[1])
                 price += ask[0] * abs(ask[1])
@@ -539,8 +548,15 @@ class Trader:
                     else:
                         price -= ask[0] * (volume % weight)
                         volume -= volume % weight
+                    if i > 0:
+                        price -= ask[0] * (volume - weight)
+                        volume = weight
+                    else:
+                        price -= ask[0] * (volume % weight)
+                        volume -= volume % weight
                     take_price = ask[0]
                     break
+            best_asks[product] = (take_price, price / volume if volume >= weight else np.nan, volume // weight)
             best_asks[product] = (take_price, price / volume if volume >= weight else np.nan, volume // weight)
         # Calculate the implied bid and ask for the synthetic basket
         implied_bid = sum(item_per_basket[product] * price for product, (_, price, _) in best_bids.items())
