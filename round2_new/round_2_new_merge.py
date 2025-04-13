@@ -488,7 +488,7 @@ class Trader:
         return 0
 
     def get_synthetic_basket_order_depth(
-        self, order_depths: Dict[str, OrderDepth], product: str, max_levels: int
+        self, order_depths: Dict[str, OrderDepth], product: str, max_levels: int = 3
     ) -> (OrderDepth, dict, dict):
         # Constants
         item_per_basket = eval(f'{product}_WEIGHTS')
