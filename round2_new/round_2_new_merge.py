@@ -511,7 +511,7 @@ class Trader:
                     volume -= volume % weight
                     take_price = bid[0]
                     break
-            best_bids[product] = (take_price, price / volume if volume > 0 else np.nan, volume / weight)
+            best_bids[product] = (take_price, price / volume if volume > 0 else np.nan, volume // weight)
             
             asks = sorted(order_depths[product].sell_orders.items(), key=lambda x: x[0])
             volume = 0
@@ -525,7 +525,7 @@ class Trader:
                     volume -= volume % weight
                     take_price = ask[0]
                     break
-            best_asks[product] = (take_price, price / volume if volume > 0 else np.nan, volume / weight)
+            best_asks[product] = (take_price, price / volume if volume > 0 else np.nan, volume // weight)
         # Calculate the implied bid and ask for the synthetic basket
         implied_bid = sum(item_per_basket[product] * price for product, (_, price, _) in best_bids.items())
         implied_ask = sum(item_per_basket[product] * price for product, (_, price, _) in best_asks.items())
@@ -642,6 +642,8 @@ class Trader:
         basket_swmid = self.get_swmid(basket_order_depth)
         synthetic_swmid = self.get_swmid(synthetic_order_depth)
         spread = basket_swmid - synthetic_swmid
+        
+       
         if spread != np.nan:
             spread_data["spread_history"].append(spread)
 
