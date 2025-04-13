@@ -513,7 +513,6 @@ class Trader:
             price = 0
             take_price = 0
             for i, bid in enumerate(bids[:max_levels]):
-            for i, bid in enumerate(bids[:max_levels]):
                 volume += bid[1]
                 price += bid[0] * bid[1]
                 if volume >= weight:
@@ -537,7 +536,6 @@ class Trader:
             volume = 0
             price = 0
             take_price = 0
-            for i, ask in enumerate(asks[:max_levels]):
             for i, ask in enumerate(asks[:max_levels]):
                 volume += abs(ask[1])
                 price += ask[0] * abs(ask[1])
