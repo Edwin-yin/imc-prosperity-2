@@ -84,10 +84,10 @@ PARAMS = {
     
     Product.SPREAD12: {
         "default_spread_mean": 0,
-        "default_spread_std": 93,
+        "default_spread_std": 40,
         "spread_std_window": 45,
-        "zscore_threshold": 0.8,
-        "target_position": 5,
+        "zscore_threshold":4.5,
+        "target_position": 20,
     },
 }
 
