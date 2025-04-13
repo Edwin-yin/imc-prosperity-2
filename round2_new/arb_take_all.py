@@ -62,9 +62,9 @@ PARAMS = {
     # },
     
     Product.KELP: {
-        "take_width": 1,
+        "take_width": 0.5,
         "clear_width": 0,
-        "clear_threshold": 5,
+        "clear_threshold": 10,
         "prevent_adverse": True,
         "adverse_volume": 15,
         "reversion_beta": -0.271, # -0.293 for weighted
@@ -84,14 +84,10 @@ PARAMS = {
     
     Product.SPREAD12: {
         "default_spread_mean": 0,
-        "spread_std_window": 50,
-        "default_spread_std": 40, 
-        "zscore_threshold": 2.5,
-        "zscore_full_position": 5,
-        # "clear_zscore_threshold": 4,
-        # "take_volume": 1,
-        # "clear_volume": 1,
-        "max_taking_levels": 2,
+        "default_spread_std": 40,
+        "spread_std_window": 45,
+        "zscore_threshold": 4,
+        "target_position": 30,
     },
 }
 
@@ -136,8 +132,7 @@ class Trader:
             Product.JAMS: 350,
             Product.DJEMBES: 60,
             Product.PICNIC_BASKET1: 60,
-            Product.PICNIC_BASKET2: 100,
-            Product.SPREAD12: 30,
+            Product.PICNIC_BASKET2: 100
         }
 
     def take_best_orders(
@@ -478,8 +473,6 @@ class Trader:
         return orders, buy_order_volume, sell_order_volume
 
     def get_swmid(self, order_depth) -> float:
-        if len(order_depth.buy_orders) == 0 or len(order_depth.sell_orders) == 0:
-            return np.nan
         best_bid = max(order_depth.buy_orders.keys())
         best_ask = min(order_depth.sell_orders.keys())
         best_bid_vol = abs(order_depth.buy_orders[best_bid])
@@ -488,16 +481,14 @@ class Trader:
 
     def get_basket_position(self, product: str, state: TradingState) -> int:
         weights = eval(f'{SYNTHETIC[product]}_WEIGHTS')
-        ret = 0
         for basket, w in weights.items():
             if w == 0 or basket not in state.position:
                 continue
-            if abs(state.position[basket] // w) > abs(ret):
-                ret = state.position[basket] // w
-        return ret
+            return state.position[basket] // w
+        return 0
 
     def get_synthetic_basket_order_depth(
-        self, order_depths: Dict[str, OrderDepth], product: str, max_levels: int
+        self, order_depths: Dict[str, OrderDepth], product: str, max_levels: int = 3
     ) -> (OrderDepth, dict, dict):
         # Constants
         item_per_basket = eval(f'{product}_WEIGHTS')
@@ -576,7 +567,7 @@ class Trader:
     def execute_spread_orders(
         self,
         target_position: int,
-        basket_position: int, 
+        basket_position: int,
         basket_order_depth: OrderDepth,
         synthetic_order_depth: OrderDepth,
         basket_bid_take: Dict[str, int],
@@ -585,8 +576,9 @@ class Trader:
         synthetic_ask_take: Dict[str, int],
         product: str
     ):
-        synthetic_product = SYNTHETIC[product]      
+        synthetic_product = SYNTHETIC[product]
         if target_position == basket_position:
+            print(f'Target position {target_position} for {product} already reached.')
             return None
 
         target_quantity = abs(target_position - basket_position)
@@ -647,19 +639,19 @@ class Trader:
         product: Product,
         basket_position: int,
         TraderObject: Dict[str, Any],
-        max_taking_levels: int = 3,
     ):
         if product not in SYNTHETIC.keys():
             return None
         synthetic_product = SYNTHETIC[product]
         spread_product = SPREAD[product]
         spread_data = TraderObject[spread_product]
-        basket_order_depth, basket_bid_take, basket_ask_take = self.get_synthetic_basket_order_depth(order_depths, synthetic_product, max_taking_levels)
-        synthetic_order_depth, synthetic_bid_take, synthetic_ask_take = self.get_synthetic_basket_order_depth(order_depths, product, max_taking_levels)
+        basket_order_depth, basket_bid_take, basket_ask_take = self.get_synthetic_basket_order_depth(order_depths, synthetic_product)
+        synthetic_order_depth, synthetic_bid_take, synthetic_ask_take = self.get_synthetic_basket_order_depth(order_depths, product)
         basket_swmid = self.get_swmid(basket_order_depth)
         synthetic_swmid = self.get_swmid(synthetic_order_depth)
         spread = basket_swmid - synthetic_swmid
-
+        
+       
         if spread != np.nan:
             spread_data["spread_history"].append(spread)
 
@@ -672,17 +664,15 @@ class Trader:
             spread_data["spread_history"].pop(0)
 
         spread_std = np.std(spread_data["spread_history"])
+
         zscore = (
             spread - self.params[spread_product]["default_spread_mean"]
         ) / spread_std
-
         spread_data["prev_zscore"] = zscore
         if zscore >= self.params[spread_product]["zscore_threshold"]:
-            target_position = max(-round((zscore - self.params[spread_product]["zscore_threshold"]) / (self.params[spread_product]["zscore_full_position"] - self.params[spread_product]["zscore_threshold"]) * self.LIMIT[spread_product]), -self.LIMIT[spread_product])
-            if basket_position > target_position:
-                spread_data["clear_flag"] = False
+            if basket_position > -self.params[spread_product]["target_position"]:
                 return self.execute_spread_orders(
-                    target_position,
+                    -self.params[spread_product]["target_position"],
                     basket_position,
                     basket_order_depth,
                     synthetic_order_depth,
@@ -694,11 +684,9 @@ class Trader:
                 )
 
         if zscore <= -self.params[spread_product]["zscore_threshold"]:
-            target_position = min(round(-(zscore + self.params[spread_product]["zscore_threshold"]) / (self.params[spread_product]["zscore_full_position"] - self.params[spread_product]["zscore_threshold"]) * self.LIMIT[spread_product]), self.LIMIT[spread_product])
-            if target_position > basket_position:
-                spread_data["clear_flag"] = False
+            if basket_position < self.params[spread_product]["target_position"]:
                 return self.execute_spread_orders(
-                    target_position,
+                    self.params[spread_product]["target_position"],
                     basket_position,
                     basket_order_depth,
                     synthetic_order_depth,
@@ -708,35 +696,8 @@ class Trader:
                     synthetic_ask_take,
                     product,
                 )
-            
-        # if basket_position > 0 and zscore >= self.params[spread_product]["clear_zscore_threshold"]:
-        #     spread_data["clear_flag"] = True
-        #     return self.execute_spread_orders(
-        #         -min(self.params[spread_product]["clear_volume"], basket_position),
-        #         basket_order_depth,
-        #         synthetic_order_depth,
-        #         basket_bid_take,
-        #         basket_ask_take,
-        #         synthetic_bid_take,
-        #         synthetic_ask_take,
-        #         product,
-        #     )
-            
-        # if basket_position < 0 and zscore <= -self.params[spread_product]["clear_zscore_threshold"]:
-        #     spread_data["clear_flag"] = True
-        #     return self.execute_spread_orders(
-        #         min(self.params[spread_product]["clear_volume"], -basket_position),
-        #         basket_order_depth,
-        #         synthetic_order_depth,
-        #         basket_bid_take,
-        #         basket_ask_take,
-        #         synthetic_bid_take,
-        #         synthetic_ask_take,
-        #         product,
-        #     )
         return None
-    
-    
+
     
     def run(self, state: TradingState):
         traderObject = {}
@@ -911,7 +872,6 @@ class Trader:
                 product,
                 self.get_basket_position(product, state),
                 traderObject,
-                self.params[spread_product]["max_taking_levels"],
             )
         
             if spread_orders != None:

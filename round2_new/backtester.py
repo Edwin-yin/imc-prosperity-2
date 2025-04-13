@@ -282,7 +282,6 @@ class Backtester:
 if __name__ == '__main__':
     from round_2_new_merge import Trader
 
-
     def calculate_SQUID_INK_fair(order_depth):
         # assumes order_depth has orders in it
         best_ask = min(order_depth.sell_orders.keys())
@@ -338,10 +337,6 @@ if __name__ == '__main__':
         "SQUID_INK": calculate_SQUID_INK_fair,
         "KELP": calculate_KELP_fair,
     }
-    # run
-    day = 0
-    market_data = pd.read_csv(f"./round-2-island-data-bottle/prices_round_2_day_{day}.csv", sep=";", header=0)
-    trade_history = pd.read_csv(f"./round-2-island-data-bottle/trades_round_2_day_{day}.csv", sep=";", header=0)
     import io
     def _process_data_(file):
         with open(file, 'r') as file:
@@ -357,8 +352,16 @@ if __name__ == '__main__':
         # print(sections[1])
         return market_data_df, trade_history_df
     #market_data, trade_history = _process_data_('./logs/roun1_0.log')
-    trader = Trader()
-    backtester = Backtester(trader, listings, position_limit, fair_calculations, market_data, trade_history,
-                            "trade_history_sim.log")
-    backtester.run()
-    print(backtester.pnl)
+    # run
+    pnl = {}
+    for day in [-1, 0, 1]:
+        market_data = pd.read_csv(f"./round-2-island-data-bottle/prices_round_2_day_{day}.csv", sep=";", header=0)
+        trade_history = pd.read_csv(f"./round-2-island-data-bottle/trades_round_2_day_{day}.csv", sep=";", header=0)
+
+        trader = Trader()
+        backtester = Backtester(trader, listings, position_limit, fair_calculations, market_data, trade_history,
+                                "trade_history_sim.log")
+        backtester.run()
+        pnl[day] = backtester.pnl
+    for k, v in pnl.items():
+        print(f"Day {k}: {v}")
