@@ -62,9 +62,9 @@ PARAMS = {
     # },
     
     Product.KELP: {
-        "take_width": 0.5,
+        "take_width": 1,
         "clear_width": 0,
-        "clear_threshold": 10,
+        "clear_threshold": 0,
         "prevent_adverse": True,
         "adverse_volume": 15,
         "reversion_beta": -0.271, # -0.293 for weighted
@@ -72,7 +72,7 @@ PARAMS = {
         "disregard_edge": 1,
         "join_edge": 1,
         "default_edge": 2,
-        "soft_position_limit": 30,
+        "soft_position_limit": 50,
     },
     
     # Product.SPREAD: {
@@ -88,6 +88,7 @@ PARAMS = {
         "spread_std_window": 45,
         "zscore_threshold": 4,
         "target_position": 30,
+        "max_taking_levels": 5,
     },
 }
 
@@ -457,8 +458,10 @@ class Trader:
         if manage_position:
             if position > soft_position_limit:
                 ask -= 1
+                bid -= 1
             elif position < -1 * soft_position_limit:
                 bid += 1
+                ask += 1
 
         buy_order_volume, sell_order_volume = self.market_make(
             product,
@@ -488,7 +491,7 @@ class Trader:
         return 0
 
     def get_synthetic_basket_order_depth(
-        self, order_depths: Dict[str, OrderDepth], product: str, max_levels: int = 3
+        self, order_depths: Dict[str, OrderDepth], product: str, max_levels: int
     ) -> (OrderDepth, dict, dict):
         # Constants
         item_per_basket = eval(f'{product}_WEIGHTS')
@@ -639,14 +642,15 @@ class Trader:
         product: Product,
         basket_position: int,
         TraderObject: Dict[str, Any],
+        max_levels: int,
     ):
         if product not in SYNTHETIC.keys():
             return None
         synthetic_product = SYNTHETIC[product]
         spread_product = SPREAD[product]
         spread_data = TraderObject[spread_product]
-        basket_order_depth, basket_bid_take, basket_ask_take = self.get_synthetic_basket_order_depth(order_depths, synthetic_product)
-        synthetic_order_depth, synthetic_bid_take, synthetic_ask_take = self.get_synthetic_basket_order_depth(order_depths, product)
+        basket_order_depth, basket_bid_take, basket_ask_take = self.get_synthetic_basket_order_depth(order_depths, synthetic_product, max_levels)
+        synthetic_order_depth, synthetic_bid_take, synthetic_ask_take = self.get_synthetic_basket_order_depth(order_depths, product, max_levels)
         basket_swmid = self.get_swmid(basket_order_depth)
         synthetic_swmid = self.get_swmid(synthetic_order_depth)
         spread = basket_swmid - synthetic_swmid
@@ -712,7 +716,7 @@ class Trader:
                 if Product.RAINFOREST_RESIN in state.position
                 else 0
             )
-            if resin_position >= self.LIMIT[Product.RAINFOREST_RESIN]:
+            if abs(resin_position) >= self.LIMIT[Product.RAINFOREST_RESIN]:
                 print(f"Resin position limit reached at time {state.timestamp}. Current postiion: {resin_position}")
             resin_take_orders, buy_order_volume, sell_order_volume = (
                 self.take_orders(
@@ -758,7 +762,7 @@ class Trader:
                 if Product.SQUID_INK in state.position
                 else 0
             )
-            if squidink_position >= self.LIMIT[Product.SQUID_INK]:
+            if abs(squidink_position) >= self.LIMIT[Product.SQUID_INK]:
                 print(f"Squidink position limit reached at {state.timestamp}. Current position: {squidink_position}")
             squidink_fair_value = self.squidink_fair_value(
                 state.order_depths[Product.SQUID_INK], traderObject
@@ -807,7 +811,7 @@ class Trader:
                 if Product.KELP in state.position
                 else 0
             )
-            if kelp_position >= self.LIMIT[Product.KELP]:
+            if abs(kelp_position) >= self.LIMIT[Product.KELP]:
                 print(f"Kelp position limit reached at {state.timestamp}. Current position: {kelp_position}")
             kelp_fair_value = self.kelp_fair_value(
                 state.order_depths[Product.KELP], traderObject
@@ -819,6 +823,7 @@ class Trader:
                 kelp_fair_value = traderObject.get("kelp_last_price", None)
             
             if kelp_fair_value is not None:
+                # Take orders may have negative effect
                 kelp_take_orders, buy_order_volume, sell_order_volume = (
                     self.take_orders(
                         Product.KELP,
@@ -852,6 +857,8 @@ class Trader:
                     self.params[Product.KELP]["disregard_edge"],
                     self.params[Product.KELP]["join_edge"],
                     self.params[Product.KELP]["default_edge"],
+                    True,
+                    self.params[Product.KELP]["soft_position_limit"],
                 )
                 result[Product.KELP] = (
                     kelp_take_orders + kelp_clear_orders + kelp_make_orders
@@ -872,6 +879,7 @@ class Trader:
                 product,
                 self.get_basket_position(product, state),
                 traderObject,
+                self.params[spread_product]["max_taking_levels"],
             )
         
             if spread_orders != None:

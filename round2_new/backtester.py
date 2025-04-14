@@ -342,7 +342,7 @@ class Backtester:
 
 
 if __name__ == '__main__':
-    from round_2_new_merge import Trader
+    from arb_take_all import Trader
 
     def calculate_SQUID_INK_fair(order_depth):
         # assumes order_depth has orders in it
@@ -413,3 +413,4 @@ if __name__ == '__main__':
         pnl[day] = backtester.pnl
     for k, v in pnl.items():
         print(f"Day {k}: {v}")
+        print(f"Arbitrage pnl: {v['PICNIC_BASKET2'] + v['PICNIC_BASKET1'] + v['DJEMBES']}")
