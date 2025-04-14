@@ -434,4 +434,4 @@ if __name__ == '__main__':
         pnl[day] = backtester.pnl
     for k, v in pnl.items():
         print(f"Day {k}: {v}")
-        print(f"Arbitrage pnl: {v['PICNIC_BASKET2'] + v['PICNIC_BASKET1'] + v['DJEMBES']}")
+        print(f"Arbitrage pnl: {v['PICNIC_BASKET2'] + v['PICNIC_BASKET1'] + v['DJEMBES'] + v['CROISSANTS'] + v['JAMS']}")

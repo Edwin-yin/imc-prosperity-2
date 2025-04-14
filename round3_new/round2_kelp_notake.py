@@ -75,12 +75,14 @@ PARAMS = {
         "soft_position_limit": 50,
     },
     
-    # Product.SPREAD: {
-    #     "default_spread_mean": 379.50439988484239,
-    #     "default_spread_std": 76.07966,
-    #     "spread_std_window": 45,
-    #     "zscore_threshold": 7,
-    #     "target_position": 58,},
+    Product.SPREAD1: {
+        "default_spread_mean": 49,
+        "default_spread_std": 85,
+        "spread_std_window": 45,
+        "zscore_threshold": 4,
+        "target_position": 41,
+        "max_taking_levels": 5,
+    },
     
     Product.SPREAD12: {
         "default_spread_mean": 0,
@@ -148,7 +150,7 @@ class Trader:
         sell_order_volume: int,
         prevent_adverse: bool = False,
         adverse_volume: int = 0,
-    ) -> (int, int):
+    ) -> tuple[int, int]:
         position_limit = self.LIMIT[product]
 
         # Process sell orders (best ask)
@@ -198,7 +200,7 @@ class Trader:
         position: int,
         buy_order_volume: int,
         sell_order_volume: int,
-    ) -> (int, int):
+    ) -> tuple[int, int]:
         buy_quantity = self.LIMIT[product] - (position + buy_order_volume)
         if buy_quantity > 0:
             orders.append(Order(product, round(bid), buy_quantity))  # Buy order
@@ -367,7 +369,7 @@ class Trader:
         position: int,
         prevent_adverse: bool = False,
         adverse_volume: int = 0,
-    ) -> (List[Order], int, int):
+    ) -> tuple[List[Order], int, int]:
         orders: List[Order] = []
         buy_order_volume = 0
         sell_order_volume = 0
@@ -396,7 +398,7 @@ class Trader:
         buy_order_volume: int,
         sell_order_volume: int,
         clear_threshold: int = 0,
-    ) -> (List[Order], int, int):
+    ) -> tuple[List[Order], int, int]:
         orders: List[Order] = []
         buy_order_volume, sell_order_volume = self.clear_position_order(
             product,
@@ -425,7 +427,7 @@ class Trader:
         manage_position: bool = False,
         soft_position_limit: int = 0,
         # will penny all other levels with higher edge
-    ):
+    ) -> tuple[List[Order], int, int]:
         orders: List[Order] = []
         asks_above_fair = [
             price
@@ -476,23 +478,34 @@ class Trader:
         return orders, buy_order_volume, sell_order_volume
 
     def get_swmid(self, order_depth) -> float:
-        best_bid = max(order_depth.buy_orders.keys())
-        best_ask = min(order_depth.sell_orders.keys())
-        best_bid_vol = abs(order_depth.buy_orders[best_bid])
-        best_ask_vol = abs(order_depth.sell_orders[best_ask])
-        return (best_bid * best_ask_vol + best_ask * best_bid_vol) / (best_bid_vol + best_ask_vol) if best_bid_vol + best_ask_vol != 0 else np.nan
+        best_bid = max(order_depth.buy_orders.keys()) if len(order_depth.buy_orders) != 0 else np.nan
+        best_ask = min(order_depth.sell_orders.keys()) if len(order_depth.sell_orders) != 0 else np.nan
+        best_bid_vol = abs(order_depth.buy_orders[best_bid]) if best_bid != np.nan else 0
+        best_ask_vol = abs(order_depth.sell_orders[best_ask]) if best_ask != np.nan else 0
+        return (best_bid * best_ask_vol + best_ask * best_bid_vol) / (best_bid_vol + best_ask_vol) if best_bid_vol != 0 and best_ask_vol != 0 else np.nan
 
     def get_basket_position(self, product: str, state: TradingState) -> int:
         weights = eval(f'{SYNTHETIC[product]}_WEIGHTS')
+        position = 0
         for basket, w in weights.items():
             if w == 0 or basket not in state.position:
                 continue
-            return state.position[basket] // w
-        return 0
+            if abs(round(state.position[basket] / w)) > abs(position):
+                position = round(state.position[basket] / w)
+                
+        # Opposite positions for synthetic products
+        weights = eval(f'{product}_WEIGHTS')
+        opposite_position = 0
+        for basket, w in weights.items():
+            if w == 0 or basket not in state.position:
+                continue
+            if abs(round(state.position[basket] / w)) > abs(position):
+                opposite_position = round(state.position[basket] / w)
+        return position if abs(position) > abs(opposite_position) else -opposite_position
 
     def get_synthetic_basket_order_depth(
         self, order_depths: Dict[str, OrderDepth], product: str, max_levels: int
-    ) -> (OrderDepth, dict, dict):
+    ) -> tuple[OrderDepth, dict, dict]:
         # Constants
         item_per_basket = eval(f'{product}_WEIGHTS')
         # Initialize the synthetic basket order depth
@@ -551,21 +564,84 @@ class Trader:
             implied_ask_volume = min(
                 volume for _, (_, _, volume) in best_asks.items()
             )
-            synthetic_order_price.sell_orders[implied_ask] = implied_ask_volume
+            synthetic_order_price.sell_orders[implied_ask] = -implied_ask_volume
         return synthetic_order_price, {product: take_price for product, (take_price, _, _) in best_bids.items() if take_price != 0}, {product: take_price for product, (take_price, _, _) in best_asks.items() if take_price != 0}
 
     def convert_synthetic_basket_order(
-        self, synthetic_order: Order, bid_take_price: Dict[str, int], ask_take_price: Dict[str, int], product: str
-    ) -> Dict[str, Order]:
+        self, 
+        synthetic_order: Order, 
+        bid_take_price: Dict[str, int], 
+        ask_take_price: Dict[str, int], 
+        product: str,
+        product_positions: Dict[str, int],
+        order_depths: Dict[str, OrderDepth],
+    ) -> tuple[Dict[str, Order], Order]:
         # Initialize the dictionary to store component orders
         component_orders = dict()
+        synthetic_quantity = synthetic_order.quantity
+        # Limit the quantity by position limits and orderbook size
         for component, quantity in eval(f'{product}_WEIGHTS').items():
-            component_orders[component] = Order(
-                component,
-                ask_take_price[component] if synthetic_order.quantity > 0 else bid_take_price[component],
-                quantity * synthetic_order.quantity,
-            )
-        return component_orders
+            # Positions limits
+            new_position = product_positions.get(component, 0) + synthetic_quantity * quantity
+            if new_position > self.LIMIT[component]:
+                synthetic_quantity = round((self.LIMIT[component] - product_positions.get(component, 0)) / quantity)
+            elif new_position < -self.LIMIT[component]:
+                synthetic_quantity = round((-self.LIMIT[component] - product_positions.get(component, 0)) / quantity)
+            # Orderbook size limits
+            available_quantity = 0
+            if synthetic_quantity > 0:
+                for price, size in order_depths[component].sell_orders.items():
+                    if price <= ask_take_price[component]:
+                        available_quantity -= size
+                if available_quantity < synthetic_quantity * quantity:
+                    synthetic_quantity = round(available_quantity / quantity)
+            else:
+                for price, size in order_depths[component].buy_orders.items():
+                    if price >= bid_take_price[component]:
+                        available_quantity -= size
+                if available_quantity > synthetic_quantity * quantity:
+                    synthetic_quantity = round(available_quantity / quantity)
+        synthetic_order.quantity = synthetic_quantity      
+                  
+        # Execute orders and update order depths and product_positions as if the orders were taken
+        for component, quantity in eval(f'{product}_WEIGHTS').items():
+            if synthetic_quantity > 0:
+                volume = quantity * synthetic_quantity
+                component_orders[component] = Order(
+                    component,
+                    ask_take_price[component],
+                    volume,
+                )
+                # Update positions
+                product_positions[component] = product_positions.get(component, 0) + volume
+                # Update order_depths
+                for price, size in sorted(order_depths[component].sell_orders.items(), key=lambda x: x[0]):
+                    if volume >= -size:
+                        volume += size
+                        del order_depths[component].sell_orders[price]
+                    else:
+                        order_depths[component].sell_orders[price] += volume
+                        break
+                
+            else:
+                volume = quantity * synthetic_quantity
+                component_orders[component] = Order(
+                    component,
+                    bid_take_price[component],
+                    volume,
+                )
+                # Update positions
+                product_positions[component] = product_positions.get(component, 0) + volume
+                # Update order_depths
+                for price, size in sorted(order_depths[component].buy_orders.items(), key=lambda x: x[0], reverse=True):
+                    if -volume >= size:
+                        volume += size
+                        del order_depths[component].buy_orders[price]
+                    else:
+                        order_depths[component].buy_orders[price] += volume
+                        break
+
+        return component_orders, synthetic_order
 
     def execute_spread_orders(
         self,
@@ -577,8 +653,10 @@ class Trader:
         basket_ask_take: Dict[str, int],
         synthetic_bid_take: Dict[str, int],
         synthetic_ask_take: Dict[str, int],
-        product: str
-    ):
+        product: str,
+        product_positions: Dict[str, int],
+        order_depths: Dict[str, OrderDepth],
+    ) -> None | Dict[str, Order]:
         synthetic_product = SYNTHETIC[product]
         if target_position == basket_position:
             print(f'Target position {target_position} for {product} already reached.')
@@ -602,12 +680,12 @@ class Trader:
             
             synthetic_order = Order(synthetic_product, synthetic_bid_price, -execute_volume)
 
-            aggregate_order = self.convert_synthetic_basket_order(
-                synthetic_order, synthetic_bid_take, synthetic_ask_take, product
+            aggregate_order, synthetic_order = self.convert_synthetic_basket_order(
+                synthetic_order, synthetic_bid_take, synthetic_ask_take, product, product_positions, order_depths,
             )
         
             aggregate_order.update(
-                self.convert_synthetic_basket_order(basket_order, basket_bid_take, basket_ask_take, synthetic_product)
+                self.convert_synthetic_basket_order(basket_order, basket_bid_take, basket_ask_take, synthetic_product, product_positions, order_depths)[0]
             )
             return aggregate_order
 
@@ -626,24 +704,24 @@ class Trader:
             basket_order = Order(product, basket_bid_price, -execute_volume)
             
             synthetic_order = Order(synthetic_product, synthetic_ask_price, execute_volume)
-
             
-            aggregate_order = self.convert_synthetic_basket_order(
-                synthetic_order, synthetic_bid_take, synthetic_ask_take, product
+            aggregate_order, synthetic_order = self.convert_synthetic_basket_order(
+                synthetic_order, synthetic_bid_take, synthetic_ask_take, product, product_positions, order_depths
             )
             aggregate_order.update(
-                self.convert_synthetic_basket_order(basket_order, basket_bid_take, basket_ask_take, synthetic_product)
+                self.convert_synthetic_basket_order(basket_order, basket_bid_take, basket_ask_take, synthetic_product, product_positions, order_depths)[0]
             )
             return aggregate_order
 
     def spread_orders(
         self,
         order_depths: Dict[str, OrderDepth],
+        positions: Dict[str, int],
         product: Product,
         basket_position: int,
         TraderObject: Dict[str, Any],
         max_levels: int,
-    ):
+    ) -> None | Dict[str, Order]:
         if product not in SYNTHETIC.keys():
             return None
         synthetic_product = SYNTHETIC[product]
@@ -685,6 +763,8 @@ class Trader:
                     synthetic_bid_take,
                     synthetic_ask_take,
                     product,
+                    positions,
+                    order_depths,
                 )
 
         if zscore <= -self.params[spread_product]["zscore_threshold"]:
@@ -699,6 +779,8 @@ class Trader:
                     synthetic_bid_take,
                     synthetic_ask_take,
                     product,
+                    positions,
+                    order_depths,
                 )
         return None
 
@@ -716,8 +798,8 @@ class Trader:
                 if Product.RAINFOREST_RESIN in state.position
                 else 0
             )
-            if abs(resin_position) >= self.LIMIT[Product.RAINFOREST_RESIN]:
-                print(f"Resin position limit reached at time {state.timestamp}. Current postiion: {resin_position}")
+            # if abs(resin_position) >= self.LIMIT[Product.RAINFOREST_RESIN]:
+            #     print(f"Resin position limit reached at time {state.timestamp}. Current postiion: {resin_position}")
             resin_take_orders, buy_order_volume, sell_order_volume = (
                 self.take_orders(
                     Product.RAINFOREST_RESIN,
@@ -762,8 +844,8 @@ class Trader:
                 if Product.SQUID_INK in state.position
                 else 0
             )
-            if abs(squidink_position) >= self.LIMIT[Product.SQUID_INK]:
-                print(f"Squidink position limit reached at {state.timestamp}. Current position: {squidink_position}")
+            # if abs(squidink_position) >= self.LIMIT[Product.SQUID_INK]:
+            #     print(f"Squidink position limit reached at {state.timestamp}. Current position: {squidink_position}")
             squidink_fair_value = self.squidink_fair_value(
                 state.order_depths[Product.SQUID_INK], traderObject
             )
@@ -811,8 +893,8 @@ class Trader:
                 if Product.KELP in state.position
                 else 0
             )
-            if abs(kelp_position) >= self.LIMIT[Product.KELP]:
-                print(f"Kelp position limit reached at {state.timestamp}. Current position: {kelp_position}")
+            # if abs(kelp_position) >= self.LIMIT[Product.KELP]:
+            #     print(f"Kelp position limit reached at {state.timestamp}. Current position: {kelp_position}")
             kelp_fair_value = self.kelp_fair_value(
                 state.order_depths[Product.KELP], traderObject
             )
@@ -864,8 +946,9 @@ class Trader:
                     kelp_take_orders + kelp_clear_orders + kelp_make_orders
                 )
         # Spread orders
-
-        for product in [Product.BASKET1BY2, ]:
+        order_depths = state.order_depths.copy()
+        position = state.position.copy()
+        for product in [Product.BASKET1BY2, Product.PICNIC_BASKET1]:
             spread_product = SPREAD[product]
             if spread_product not in traderObject.keys():
                 traderObject[spread_product] = {
@@ -875,14 +958,15 @@ class Trader:
                     "curr_avg": 0,
                 }
             spread_orders = self.spread_orders(
-                state.order_depths,
+                order_depths,
+                position,
                 product,
                 self.get_basket_position(product, state),
                 traderObject,
                 self.params[spread_product]["max_taking_levels"],
             )
         
-            if spread_orders != None:
+            if spread_orders is not None:
                 for product, order in spread_orders.items():
                     if product not in result.keys():
                         result[product] = []
@@ -897,5 +981,8 @@ class Trader:
         conversions = 1
         traderData = jsonpickle.encode(traderObject)
         # traderData = None
-
+        # if state.timestamp % 100000 == 99900:
+        #     print(state.timestamp)
+        #     print(state.position)
+        #     print(self.get_basket_position(Product.BASKET1BY2, state))
         return result, conversions, traderData
