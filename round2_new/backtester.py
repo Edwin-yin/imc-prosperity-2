@@ -409,7 +409,6 @@ if __name__ == '__main__':
         return market_data_df, trade_history_df
     #market_data, trade_history = _process_data_('./logs/roun1_0.log')
     # run
-<<<<<<< HEAD
     # for day in [0]:
     # #day = -1
     #     market_data = pd.read_csv(f"./round-2-island-data-bottle/prices_round_2_day_{day}.csv", sep=";", header=0)
