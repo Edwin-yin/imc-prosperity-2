@@ -894,6 +894,10 @@ class Trader:
                 # print(state.order_depths[Product.PICNIC_BASKET1].sell_orders)
                 # print(state.order_depths[Product.PICNIC_BASKET2].sell_orders)
                 # print(state.order_depths[Product.DJEMBES].sell_orders)
+        if state.timestamp % 100000 == 99900:
+            print(state.timestamp)
+            print(state.position)
+            print(self.get_basket_position(Product.BASKET1BY2, state))
         conversions = 1
         traderData = jsonpickle.encode(traderObject)
         # traderData = None
