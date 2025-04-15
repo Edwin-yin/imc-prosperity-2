@@ -429,7 +429,7 @@ if __name__ == '__main__':
 
         trader = Trader()
         backtester = Backtester(trader, listings, position_limit, fair_calculations, market_data, trade_history,
-                                "trade_history_sim.log")
+                                f"trade_history_sim_day_{day}.log")
         backtester.run()
         pnl[day] = backtester.pnl
     for k, v in pnl.items():
