@@ -350,7 +350,7 @@ class Backtester:
 
 
 if __name__ == '__main__':
-    from round2_kelp_notake import Trader
+    from round3_new.round2_arb_final import Trader
 
     def calculate_SQUID_INK_fair(order_depth):
         # assumes order_depth has orders in it
