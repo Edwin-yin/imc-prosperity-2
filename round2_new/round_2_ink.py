@@ -58,10 +58,11 @@ PARAMS = {
         "disregard_edge": 1,
         "join_edge": 2,
         "default_edge": 4,
-        "soft_position_limit": 10,
+        "soft_position_limit": 0,
         "zscore_threshold": 3.0,
         "zscore_threshold_for_clean": 1.0,
         "price_std_window": 100,
+        "final_timestamp": 950000
     },
     
     # Product.KELP: {
@@ -204,10 +205,12 @@ class Trader:
         sell_order_volume: int,
         prevent_adverse: bool = False,
         adverse_volume: int = 0,
-
+        timestamp: int = 0,
         traderObject: Dict[str, Any] = None,
     ) -> (int, int):
         # TODO: we need add timestamp as we should do nothing in the end
+        if timestamp == 41300:
+            print('here')
         position_limit = self.LIMIT[product]
         best_ask = min(order_depth.sell_orders.keys()) if len(order_depth.sell_orders) != 0 else np.nan
         best_bid = max(order_depth.buy_orders.keys()) if len(order_depth.buy_orders) != 0 else np.nan
@@ -229,8 +232,6 @@ class Trader:
                  ) / np.std(traderObject[product]["price_history"])
 
 
-
-
         # Process sell orders (best ask)
         if len(order_depth.sell_orders) != 0:
             best_ask = min(order_depth.sell_orders.keys())
@@ -239,11 +240,14 @@ class Trader:
             # Check adverse condition for sell orders
             if not prevent_adverse or abs(best_ask_amount) <= adverse_volume:
                 quantity = 0
-                if zscore <= -self.params[product]['zscore_threshold']:
+                best_ask_zscore = (best_ask - np.mean(traderObject[product]["price_history"])
+                 ) / np.std(traderObject[product]["price_history"])
+                if best_ask_zscore <= -self.params[product]['zscore_threshold'] \
+                        and timestamp < self.params[product]['final_timestamp']:
                     quantity = min(
                         best_ask_amount, position_limit - position
                     )  # max amt to buy
-                elif (abs(zscore) < self.params[product]['zscore_threshold_for_clean']
+                elif (abs(best_ask_zscore) < self.params[product]['zscore_threshold_for_clean']
                          and position < -self.params[product]['soft_position_limit']):
                     quantity = min(
                         best_ask_amount, position_limit - position, -position
@@ -259,15 +263,17 @@ class Trader:
         if len(order_depth.buy_orders) != 0:
             best_bid = max(order_depth.buy_orders.keys())
             best_bid_amount = order_depth.buy_orders[best_bid]
-
+            best_bid_zscore = (best_bid - np.mean(traderObject[product]["price_history"])
+                 ) / np.std(traderObject[product]["price_history"])
             # Check adverse condition for buy orders
             if not prevent_adverse or abs(best_bid_amount) <= adverse_volume:
                 quantity = 0
-                if zscore >= self.params[product]['zscore_threshold'] : # Aggressively taking when having position
+                if best_bid_zscore >= self.params[product]['zscore_threshold'] \
+                        and timestamp < self.params[product]['final_timestamp']:
                     quantity = min(
                         best_bid_amount, position_limit + position
                     )  # should be the max we can sell
-                elif (abs(zscore) < self.params[product]['zscore_threshold_for_clean']
+                elif (abs(best_bid_zscore) < self.params[product]['zscore_threshold_for_clean']
                          and position > self.params[product]['soft_position_limit']):
                     quantity = min(
                         best_bid_amount, position_limit + position, position
@@ -348,7 +354,6 @@ class Trader:
         return buy_order_volume, sell_order_volume
 
     def squidink_fair_value(self, order_depth: OrderDepth, traderObject) -> float:
-        traderObject
         if len(order_depth.sell_orders) != 0 and len(order_depth.buy_orders) != 0:
             best_ask = min(order_depth.sell_orders.keys())
             best_bid = max(order_depth.buy_orders.keys())
@@ -488,6 +493,7 @@ class Trader:
         position: int,
         prevent_adverse: bool = False,
         adverse_volume: int = 0,
+        timestamp: int = 0,
         traderObject: Dict[str, Any] = None,
     ) -> (List[Order], int, int):
         orders: List[Order] = []
@@ -505,6 +511,7 @@ class Trader:
             sell_order_volume,
             prevent_adverse,
             adverse_volume,
+            timestamp,
             traderObject
         )
         return orders, buy_order_volume, sell_order_volume
@@ -895,6 +902,7 @@ class Trader:
                     squidink_position,
                     self.params[Product.SQUID_INK]["prevent_adverse"],
                     self.params[Product.SQUID_INK]["adverse_volume"],
+                    state.timestamp,
                     traderObject,
                 )
             )

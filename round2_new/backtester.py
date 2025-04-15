@@ -4,6 +4,8 @@ import pandas as pd
 import json
 from collections import defaultdict
 import numpy as np
+import plotly.graph_objects as go
+import matplotlib.pyplot as plt
 from datamodel import TradingState, Listing, OrderDepth, Trade, Observation, Order, UserId
 
 
@@ -22,6 +24,7 @@ class Backtester:
         self.observations = [Observation({}, {}) for _ in range(len(market_data))]
 
         self.current_position = {product: 0 for product in self.listings.keys()}
+        self.position_history = {product: [] for product in self.listings.keys()}
         self.pnl_history = {product: [] for product in self.listings.keys()}
         self.pnl = {product: 0 for product in self.listings.keys()}
         self.cash = {product: 0 for product in self.listings.keys()}
@@ -98,8 +101,11 @@ class Backtester:
                             sandboxLog += f"\nOrders for product {product} exceeded limit of {self.position_limit[product]} set"
 
                 for product in products:
-                    self._mark_pnl(self.cash, self.current_position, order_depths_pnl, self.pnl, product)
-                    self.pnl_history[product].append(self.pnl[product])
+                    if product in self.listings:
+                        self._mark_pnl(self.cash, self.current_position, order_depths_pnl, self.pnl, product)
+                        self.pnl_history[product].append(self.pnl[product])
+                for product in self.listings.keys():
+                    self.position_history[product].append(self.current_position[product])
             if self.output_fair:
                 for product in self.listings.keys():
                     if self.pnl[product] != 0:
@@ -107,7 +113,7 @@ class Backtester:
                         product_df.loc[:, 'fair_price'] = self.fair_price_history[product]
                         product_df.to_csv(f'{self.output_fair}_{product}.csv', index=False)
 
-
+            # self._add_trades(self_trade_history_dict, bot_trade_history_dict)
                 # self._add_trades(own_trades, market_trades)
         else:
             for timestamp, group in timestamp_group_md:
@@ -150,10 +156,13 @@ class Backtester:
                         market_trades[product] = []
 
                 for product in products:
-                    self._mark_pnl(self.cash, self.current_position, order_depths_pnl, self.pnl, product)
-                    self.pnl_history[product].append(self.pnl[product])
+                    if product in self.listings:
+                        self._mark_pnl(self.cash, self.current_position, order_depths_pnl, self.pnl, product)
+                        self.pnl_history[product].append(self.pnl[product])
 
                 self._add_trades(own_trades, market_trades)
+                for product in self.listings.keys():
+                    self.position_history[product].append(self.current_position[product])
         return self._log_trades(self.file_name)
     
     
@@ -330,7 +339,6 @@ class Backtester:
     
     def _mark_pnl(self, cash, position, order_depths, pnl, product):
         order_depth = order_depths[product]
-        
         best_ask = min(order_depth.sell_orders.keys())
         best_bid = max(order_depth.buy_orders.keys())
         mid = (best_ask + best_bid)/2
@@ -387,28 +395,106 @@ if __name__ == '__main__':
         "SQUID_INK": calculate_SQUID_INK_fair
     }
     # run
-    for day in [-1,0,1]:
+    # for day in [0]:
+    # #day = -1
+    #     market_data = pd.read_csv(f"./round-2-island-data-bottle/prices_round_2_day_{day}.csv", sep=";", header=0)
+    #     trade_history = pd.read_csv(f"./round-2-island-data-bottle/trades_round_2_day_{day}.csv", sep=";", header=0)
+    #     import io
+    #     def _process_data_(file):
+    #         with open(file, 'r') as file:
+    #             log_content = file.read()
+    #         sections = log_content.split('Sandbox logs:')[1].split('Activities log:')
+    #         sandbox_log = sections[0].strip()
+    #         activities_log = sections[1].split('Trade History:')[0]
+    #         # sandbox_log_list = [json.loads(line) for line in sandbox_log.split('\n')]
+    #         trade_history = json.loads(sections[1].split('Trade History:')[1])
+    #         # sandbox_log_df = pd.DataFrame(sandbox_log_list)
+    #         market_data_df = pd.read_csv(io.StringIO(activities_log), sep=";", header=0)
+    #         trade_history_df = pd.json_normalize(trade_history)
+    #         # print(sections[1])
+    #         return market_data_df, trade_history_df
+    #     # market_data, trade_history = _process_data_('./webruns/aggress_time.log')
+    #     # market_data, trade_history = _process_data_('./webruns/null_strategy.log')
+    #     trader = Trader()
+    #     backtester = Backtester(trader, listings, position_limit, fair_calculations, market_data, trade_history,
+    #                             "trade_history_sim.log", False, None)
+    #     backtester.run()
+    #     print(backtester.pnl)
+    #     df_ink = market_data[market_data['product'] == 'SQUID_INK']
+    #     fig, ax1 = plt.subplots()
+    #     # 绘制第一条折线（左侧Y轴）
+    #     max_pnl = max(backtester.pnl_history['SQUID_INK'])
+    #     color = 'tab:blue'
+    #     ax1.set_xlabel('Time')
+    #     ax1.set_ylabel('pnl', color=color)
+    #     ax1.plot(df_ink['timestamp'] / 100, np.array(backtester.pnl_history['SQUID_INK'])*50/max_pnl, color=color, marker='o',linestyle='-')
+    #     ax1.tick_params(axis='y', labelcolor=color)
+    #
+    #     # 创建第二个Y轴
+    #     ax2 = ax1.twinx()
+    #     color = 'tab:red'
+    #     ax2.set_ylabel('pos', color=color)
+    #     ax2.plot(df_ink['timestamp'] / 100, np.array(backtester.position_history['SQUID_INK']), color=color, linestyle='-', marker='s')
+    #     ax2.tick_params(axis='y', labelcolor=color)
+    #
+    #     # 创建第二个Y轴
+    #     ax3 = ax1.twinx()
+    #     color = 'tab:green'
+    #     ax3.set_ylabel('price', color=color)
+    #     ax3.plot(df_ink['timestamp'] / 100, np.array(df_ink['mid_price'])*50/np.nanmax(df_ink['mid_price']), color=color, linestyle='-',
+    #              marker='^')
+    #     ax3.tick_params(axis='y', labelcolor=color)
+    #
+    # # 显示网格
+    #     plt.grid(True)
+    #
+    #     # 显示图形
+    #     plt.show()
+
+    all_round3_backtesters = []
+    listings3 = { 'RAINFOREST_RESIN': Listing(symbol='RAINFOREST_RESIN', product='RAINFOREST_RESIN', denomination='SEASHELLS'),
+    'SQUID_INK': Listing(symbol='SQUID_INK', product='SQUID_INK', denomination='SEASHELLS'),
+     'KELP': Listing(symbol='KELP', product='KELP', denomination='SEASHELLS'),
+     'CROISSANTS': Listing(symbol='CROISSANTS', product='CROISSANTS', denomination='SEASHELLS'),
+    'JAMS': Listing(symbol='JAMS', product='JAMS', denomination='SEASHELLS'),
+    'DJEMBES': Listing(symbol='DJEMBES', product='DJEMBES', denomination='SEASHELLS'),
+     'PICNIC_BASKET1': Listing(symbol='PICNIC_BASKET1', product='PICNIC_BASKET1', denomination='SEASHELLS'),
+    'PICNIC_BASKET2': Listing(symbol='PICNIC_BASKET2', product='PICNIC_BASKET2', denomination='SEASHELLS'),
+    #
+    # 'VOLCANIC_ROCK': Listing(symbol='VOLCANIC_ROCK', product='VOLCANIC_ROCK', denomination='SEASHELLS'),
+    # 'VOLCANIC_ROCK_VOUCHER_9500': Listing(symbol='VOLCANIC_ROCK_VOUCHER_9500', product='VOLCANIC_ROCK_VOUCHER_9500', denomination='SEASHELLS'),
+    # 'VOLCANIC_ROCK_VOUCHER_9750': Listing(symbol='VOLCANIC_ROCK_VOUCHER_9750', product='VOLCANIC_ROCK_VOUCHER_9750', denomination='SEASHELLS'),
+    #  'VOLCANIC_ROCK_VOUCHER_10000': Listing(symbol='VOLCANIC_ROCK_VOUCHER_10000', product='VOLCANIC_ROCK_VOUCHER_10000', denomination='SEASHELLS'),
+    #  'VOLCANIC_ROCK_VOUCHER_10250': Listing(symbol='VOLCANIC_ROCK_VOUCHER_10250', product='VOLCANIC_ROCK_VOUCHER_10250', denomination='SEASHELLS'),
+    #  'VOLCANIC_ROCK_VOUCHER_10500': Listing(symbol='VOLCANIC_ROCK_VOUCHER_10500', product='VOLCANIC_ROCK_VOUCHER_10500', denomination='SEASHELLS'),
+     }
+
+    position_limit3 = {
+    'RAINFOREST_RESIN': 50,
+    'SQUID_INK': 50,
+    'KELP': 50,
+    'CROISSANTS': 250,
+    'JAMS': 350,
+    'DJEMBES': 60,
+    'PICNIC_BASKET1': 60,
+    'PICNIC_BASKET2': 100,
+    'VOLCANIC_ROCK_VOUCHER_9500': 200,
+    'VOLCANIC_ROCK_VOUCHER_9750': 200,
+     'VOLCANIC_ROCK_VOUCHER_10000': 200,
+    }
+
+    for day in [0,1,2]:
     #day = -1
-        market_data = pd.read_csv(f"./round-2-island-data-bottle/prices_round_2_day_{day}.csv", sep=";", header=0)
-        trade_history = pd.read_csv(f"./round-2-island-data-bottle/trades_round_2_day_{day}.csv", sep=";", header=0)
+        market_data = pd.read_csv(f"./round-3-island-data-bottle/prices_round_3_day_{day}.csv", sep=";", header=0)
+        trade_history = pd.read_csv(f"./round-3-island-data-bottle/trades_round_3_day_{day}.csv", sep=";", header=0)
+        df_ink = market_data[market_data['product'] == 'SQUID_INK']
+        #print(np.where(np.isnan(df_ink['bid_volume_1'])))
         import io
-        def _process_data_(file):
-            with open(file, 'r') as file:
-                log_content = file.read()
-            sections = log_content.split('Sandbox logs:')[1].split('Activities log:')
-            sandbox_log = sections[0].strip()
-            activities_log = sections[1].split('Trade History:')[0]
-            # sandbox_log_list = [json.loads(line) for line in sandbox_log.split('\n')]
-            trade_history = json.loads(sections[1].split('Trade History:')[1])
-            # sandbox_log_df = pd.DataFrame(sandbox_log_list)
-            market_data_df = pd.read_csv(io.StringIO(activities_log), sep=";", header=0)
-            trade_history_df = pd.json_normalize(trade_history)
-            # print(sections[1])
-            return market_data_df, trade_history_df
         # market_data, trade_history = _process_data_('./webruns/aggress_time.log')
         # market_data, trade_history = _process_data_('./webruns/null_strategy.log')
         trader = Trader()
-        backtester = Backtester(trader, listings, position_limit, fair_calculations, market_data, trade_history,
-                                "trade_history_sim.log", False, None)
+
+        backtester = Backtester(trader, listings3, position_limit3, {}, market_data, trade_history, "trade_history_sim.log", False, None)
         backtester.run()
         print(backtester.pnl)
+        all_round3_backtesters.append(copy.deepcopy(backtester))
