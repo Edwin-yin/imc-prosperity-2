@@ -350,8 +350,7 @@ class Backtester:
 
 
 if __name__ == '__main__':
-    from round_2_ink import Trader
-
+    from arb_take_all import Trader
 
     def calculate_SQUID_INK_fair(order_depth):
         # assumes order_depth has orders in it
@@ -394,7 +393,23 @@ if __name__ == '__main__':
         "RAINFOREST_RESIN": calculate_RAINFOREST_RESIN_fair,
         "SQUID_INK": calculate_SQUID_INK_fair
     }
+    import io
+    def _process_data_(file):
+        with open(file, 'r') as file:
+            log_content = file.read()
+        sections = log_content.split('Sandbox logs:')[1].split('Activities log:')
+        sandbox_log = sections[0].strip()
+        activities_log = sections[1].split('Trade History:')[0]
+        # sandbox_log_list = [json.loads(line) for line in sandbox_log.split('\n')]
+        trade_history = json.loads(sections[1].split('Trade History:')[1])
+        # sandbox_log_df = pd.DataFrame(sandbox_log_list)
+        market_data_df = pd.read_csv(io.StringIO(activities_log), sep=";", header=0)
+        trade_history_df = pd.json_normalize(trade_history)
+        # print(sections[1])
+        return market_data_df, trade_history_df
+    #market_data, trade_history = _process_data_('./logs/roun1_0.log')
     # run
+<<<<<<< HEAD
     # for day in [0]:
     # #day = -1
     #     market_data = pd.read_csv(f"./round-2-island-data-bottle/prices_round_2_day_{day}.csv", sep=";", header=0)
@@ -498,3 +513,17 @@ if __name__ == '__main__':
         backtester.run()
         print(backtester.pnl)
         all_round3_backtesters.append(copy.deepcopy(backtester))
+        """    pnl = {}
+    for day in [-1, 0, 1]:
+        market_data = pd.read_csv(f"./round-2-island-data-bottle/prices_round_2_day_{day}.csv", sep=";", header=0)
+        trade_history = pd.read_csv(f"./round-2-island-data-bottle/trades_round_2_day_{day}.csv", sep=";", header=0)
+
+        trader = Trader()
+        backtester = Backtester(trader, listings, position_limit, fair_calculations, market_data, trade_history,
+                                "trade_history_sim.log")
+        backtester.run()
+        pnl[day] = backtester.pnl
+    for k, v in pnl.items():
+        print(f"Day {k}: {v}")
+        print(f"Arbitrage pnl: {v['PICNIC_BASKET2'] + v['PICNIC_BASKET1'] + v['DJEMBES']}")
+        """
