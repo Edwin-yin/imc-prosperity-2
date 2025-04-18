@@ -350,7 +350,7 @@ class Backtester:
 
 
 if __name__ == '__main__':
-    from round3_merge import Trader
+    from round3_option_naive import Trader
 
     def calculate_SQUID_INK_fair(order_depth):
         # assumes order_depth has orders in it
@@ -423,6 +423,7 @@ if __name__ == '__main__':
     #market_data, trade_history = _process_data_('./logs/roun1_0.log')
     # run
     pnl = {}
+    pnl_history = {}
     for day in [0, 1, 2]:
         market_data = pd.read_csv(f"./round-3-island-data-bottle/prices_round_3_day_{day}.csv", sep=";", header=0)
         trade_history = pd.read_csv(f"./round-3-island-data-bottle/trades_round_3_day_{day}.csv", sep=";", header=0)
@@ -433,6 +434,12 @@ if __name__ == '__main__':
                                 f"trade_history_sim_day_{day}.log")
         backtester.run()
         pnl[day] = backtester.pnl
+        pnl_history[day] = backtester.pnl_history
+        # Save the pnl history
+        with open(f"pnl_history_day_{day}.json", "w") as file:
+            json.dump(pnl_history[day], file, indent=2)
+        print(f"Day {day} completed.")
+        print(pnl[day])
     for k, v in pnl.items():
         print(f"Day {k}: {v}")
         print(f"Arbitrage pnl: {v['PICNIC_BASKET2'] + v['PICNIC_BASKET1'] + v['DJEMBES'] + v['CROISSANTS'] + v['JAMS']}")

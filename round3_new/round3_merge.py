@@ -115,7 +115,7 @@ PARAMS = {
         "window": 100,
         "base_iv_decay": -1.089e-3, # in unit of day
         "default_parabolic_coef": 0.0642,
-        "upper_threshold": 1.5, # zscore
+        "upper_threshold": 1, # zscore
         "lower_threshold": 1,   # zscore
         "option_base_iv_beta": -0.5,
         "option_parabolic_coef_beta": -0.491,
@@ -240,7 +240,7 @@ class BlackScholes:
 
     @staticmethod
     def implied_volatility(
-        call_price, spot, strike, time_to_maturity, max_iterations=1000, tolerance=1e-5
+        call_price, spot, strike, time_to_maturity, max_iterations=200, tolerance=1e-10
     ):
         if call_price < spot - strike:
             return 0
@@ -1297,8 +1297,8 @@ class Trader:
         delta: float,
     ) -> List[Order]:
         
-        target_spot_position = math.trunc(-delta)
-        if target_spot_position == spot_position:
+        target_spot_position = round(-delta)
+        if abs(target_spot_position - spot_position) < 1.5:
             return list()
 
         target_spot_quantity = target_spot_position - spot_position
