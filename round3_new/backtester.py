@@ -350,7 +350,7 @@ class Backtester:
 
 
 if __name__ == '__main__':
-    from round2_kelp_test import Trader
+    from round3_merge import Trader
 
     def calculate_SQUID_INK_fair(order_depth):
         # assumes order_depth has orders in it
@@ -428,6 +428,7 @@ if __name__ == '__main__':
         trade_history = pd.read_csv(f"./round-3-island-data-bottle/trades_round_3_day_{day}.csv", sep=";", header=0)
 
         trader = Trader()
+        trader.params['day'] = day # Set only in offline backtester.
         backtester = Backtester(trader, listings, position_limit, fair_calculations, market_data, trade_history,
                                 f"trade_history_sim_day_{day}.log")
         backtester.run()
@@ -435,3 +436,4 @@ if __name__ == '__main__':
     for k, v in pnl.items():
         print(f"Day {k}: {v}")
         print(f"Arbitrage pnl: {v['PICNIC_BASKET2'] + v['PICNIC_BASKET1'] + v['DJEMBES'] + v['CROISSANTS'] + v['JAMS']}")
+        print(f"Option pnl: {v['VOLCANIC_ROCK'] + v['VOLCANIC_ROCK_VOUCHER_9500'] + v['VOLCANIC_ROCK_VOUCHER_9750'] + v['VOLCANIC_ROCK_VOUCHER_10000']+ v['VOLCANIC_ROCK_VOUCHER_10250'] + v['VOLCANIC_ROCK_VOUCHER_10500']}")
