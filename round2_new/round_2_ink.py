@@ -37,6 +37,7 @@ SPREAD = {
 
 PARAMS = {
     # Product.RAINFOREST_RESIN: {
+    # Product.RAINFOREST_RESIN: {
     #     "fair_value": 10000,
     #     "take_width": 1,
     #     "clear_threshold": 30,
@@ -52,16 +53,16 @@ PARAMS = {
         "take_width": 2,
         "clear_width": 0,
         "clear_threshold": 0,
-        "prevent_adverse": True,
+        "prevent_adverse": False,
         "adverse_volume": 15,
         "reversion_beta": -0.2,
         "disregard_edge": 1,
         "join_edge": 2,
         "default_edge": 4,
         "soft_position_limit": 0,
-        "zscore_threshold": 3.0,
+        "zscore_threshold": 5.0,
         "zscore_threshold_for_clean": 1.0,
-        "price_std_window": 100,
+        "price_std_window": 50,
         "final_timestamp": 950000
     },
     
@@ -209,8 +210,8 @@ class Trader:
         traderObject: Dict[str, Any] = None,
     ) -> (int, int):
         # TODO: we need add timestamp as we should do nothing in the end
-        if timestamp == 41300:
-            print('here')
+        #if timestamp == 41300:
+            #print('here')
         position_limit = self.LIMIT[product]
         best_ask = min(order_depth.sell_orders.keys()) if len(order_depth.sell_orders) != 0 else np.nan
         best_bid = max(order_depth.buy_orders.keys()) if len(order_depth.buy_orders) != 0 else np.nan

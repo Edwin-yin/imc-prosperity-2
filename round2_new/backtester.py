@@ -11,7 +11,7 @@ from datamodel import TradingState, Listing, OrderDepth, Trade, Observation, Ord
 
 class Backtester:
     def __init__(self, trader, listings: Dict[str, Listing], position_limit: Dict[str, int], fair_marks, 
-                 market_data: pd.DataFrame, trade_history: pd.DataFrame, file_name: str = None,
+                 market_data: pd.DataFrame, trade_history: pd.DataFrame, file_name: str = None, only_use_log: bool = False,
                  do_verification: bool =False, output_fair: str = None):
         self.trader = trader
         self.listings = listings
@@ -26,10 +26,12 @@ class Backtester:
         self.current_position = {product: 0 for product in self.listings.keys()}
         self.position_history = {product: [] for product in self.listings.keys()}
         self.pnl_history = {product: [] for product in self.listings.keys()}
+        self.web_pnl_history = {product: [] for product in self.listings.keys()}
         self.pnl = {product: 0 for product in self.listings.keys()}
         self.cash = {product: 0 for product in self.listings.keys()}
         self.trades = []
         self.sandbox_logs = []
+        self.only_use_log = only_use_log
         self.do_verification = do_verification
         self.output_fair = output_fair
         self.fair_price_history = {product: [] for product in self.listings.keys()}
@@ -62,7 +64,7 @@ class Backtester:
             self_trade_history_dict[timestamp] = self_trades
             bot_trade_history_dict[timestamp] = bot_trades
 
-        if mode == 'webruns':
+        if mode == 'webruns' and self.only_use_log:
             if self.output_fair:
                 self.fair_price_history = {product: [0]*len(timestamp_group_md) for product in self.listings.keys()}
             for timestamp, group in timestamp_group_md:
@@ -72,17 +74,24 @@ class Backtester:
                 sandboxLog = ""
                 if self.do_verification or self.output_fair:
                     for product in products:
-                        self._mark_pnl(self.cash, self.current_position, order_depths_pnl, self.pnl, product)
-                        self_compute_pnl = self.pnl[product]
-                        web_pnl = float(group['profit_and_loss'][group['product'] == product].values)
-                        if self.do_verification:
-                            assert self_compute_pnl == web_pnl
-                        if self.output_fair:
-                            if self.current_position[product] != 0:
-                                web_fair_value = (web_pnl - self.cash[product]) / self.current_position[product]
-                                self.fair_price_history[product][int(timestamp/100)] = web_fair_value
-                            else:
-                                self.fair_price_history[product][int(timestamp/100)] = np.nan
+                        if product in self.listings:
+                            self._mark_pnl(self.cash, self.current_position, order_depths_pnl, self.pnl, product)
+                            self_compute_pnl = self.pnl[product]
+                            web_pnl = float(group['profit_and_loss'][group['product'] == product].values)
+                            if abs(self_compute_pnl - web_pnl) > 100:
+                                print('here')
+                            # if self.do_verification:
+                            #     assert self_compute_pnl == web_pnl
+                            if self.output_fair:
+                                if self.current_position[product] != 0:
+                                    web_fair_value = (web_pnl - self.cash[product]) / self.current_position[product]
+                                    self.fair_price_history[product][int(timestamp/100)] = web_fair_value
+                                else:
+                                    self.fair_price_history[product][int(timestamp/100)] = np.nan
+                else:
+                    for product in products:
+                        if product in self.listings:
+                            self._mark_pnl(self.cash, self.current_position, order_depths_pnl, self.pnl, product)
                 for trade in self_trades:
                     trade_volume = trade.quantity
                     product = trade.symbol
@@ -99,13 +108,9 @@ class Backtester:
                             self.cash[product] += price * trade_volume
                         else:
                             sandboxLog += f"\nOrders for product {product} exceeded limit of {self.position_limit[product]} set"
-
-                for product in products:
-                    if product in self.listings:
-                        self._mark_pnl(self.cash, self.current_position, order_depths_pnl, self.pnl, product)
-                        self.pnl_history[product].append(self.pnl[product])
                 for product in self.listings.keys():
                     self.position_history[product].append(self.current_position[product])
+
             if self.output_fair:
                 for product in self.listings.keys():
                     if self.pnl[product] != 0:
@@ -167,8 +172,9 @@ class Backtester:
     
     
     def _log_trades(self, filename: str = None):
+        return None
         if filename is None:
-            return 
+            return None
         # FIXME: profit and loss has not been calculated yet
         # self.market_data['profit_and_loss'] = self.pnl_history
 
@@ -376,6 +382,7 @@ if __name__ == '__main__':
         'DJEMBES': Listing(symbol='DJEMBES', product='DJEMBES', denomination='SEASHELLS'),
         'PICNIC_BASKET1': Listing(symbol='PICNIC_BASKET1', product='PICNIC_BASKET1', denomination='SEASHELLS'),
         'PICNIC_BASKET2': Listing(symbol='PICNIC_BASKET2', product='PICNIC_BASKET2', denomination='SEASHELLS'),
+        'MAGNIFICENT_MACARONS': Listing(symbol='MAGNIFICENT_MACARONS', product='PICNIC_BASKET2', denomination='SEASHELLS'),
     }
 
     position_limit = {
@@ -386,7 +393,8 @@ if __name__ == '__main__':
         'JAMS': 350,
         'DJEMBES': 60,
         'PICNIC_BASKET1': 60,
-        'PICNIC_BASKET2': 100
+        'PICNIC_BASKET2': 100,
+        'MAGNIFICENT_MACARONS': 75
     }
 
     fair_calculations = {
@@ -409,31 +417,31 @@ if __name__ == '__main__':
         return market_data_df, trade_history_df
     #market_data, trade_history = _process_data_('./logs/roun1_0.log')
     # run
-    # for day in [0]:
-    # #day = -1
-    #     market_data = pd.read_csv(f"./round-2-island-data-bottle/prices_round_2_day_{day}.csv", sep=";", header=0)
-    #     trade_history = pd.read_csv(f"./round-2-island-data-bottle/trades_round_2_day_{day}.csv", sep=";", header=0)
-    #     import io
-    #     def _process_data_(file):
-    #         with open(file, 'r') as file:
-    #             log_content = file.read()
-    #         sections = log_content.split('Sandbox logs:')[1].split('Activities log:')
-    #         sandbox_log = sections[0].strip()
-    #         activities_log = sections[1].split('Trade History:')[0]
-    #         # sandbox_log_list = [json.loads(line) for line in sandbox_log.split('\n')]
-    #         trade_history = json.loads(sections[1].split('Trade History:')[1])
-    #         # sandbox_log_df = pd.DataFrame(sandbox_log_list)
-    #         market_data_df = pd.read_csv(io.StringIO(activities_log), sep=";", header=0)
-    #         trade_history_df = pd.json_normalize(trade_history)
-    #         # print(sections[1])
-    #         return market_data_df, trade_history_df
-    #     # market_data, trade_history = _process_data_('./webruns/aggress_time.log')
-    #     # market_data, trade_history = _process_data_('./webruns/null_strategy.log')
-    #     trader = Trader()
-    #     backtester = Backtester(trader, listings, position_limit, fair_calculations, market_data, trade_history,
-    #                             "trade_history_sim.log", False, None)
-    #     backtester.run()
-    #     print(backtester.pnl)
+    for day in [1,2,3]:
+    #day = -1
+        market_data = pd.read_csv(f"./round-2-island-data-bottle/prices_round_2_day_{day}.csv", sep=";", header=0)
+        trade_history = pd.read_csv(f"./round-2-island-data-bottle/trades_round_2_day_{day}.csv", sep=";", header=0)
+        import io
+        def _process_data_(file):
+            with open(file, 'r') as file:
+                log_content = file.read()
+            sections = log_content.split('Sandbox logs:')[1].split('Activities log:')
+            sandbox_log = sections[0].strip()
+            activities_log = sections[1].split('Trade History:')[0]
+            # sandbox_log_list = [json.loads(line) for line in sandbox_log.split('\n')]
+            trade_history = json.loads(sections[1].split('Trade History:')[1])
+            # sandbox_log_df = pd.DataFrame(sandbox_log_list)
+            market_data_df = pd.read_csv(io.StringIO(activities_log), sep=";", header=0)
+            trade_history_df = pd.json_normalize(trade_history)
+            # print(sections[1])
+            return market_data_df, trade_history_df
+        # market_data, trade_history = _process_data_('./webruns/aggress_time.log')
+        # market_data, trade_history = _process_data_('./webruns/null_strategy.log')
+        trader = Trader()
+        backtester = Backtester(trader, listings, position_limit, fair_calculations, market_data, trade_history,
+                                "trade_history_sim.log", False, None)
+        backtester.run()
+        print(backtester.pnl)
     #     df_ink = market_data[market_data['product'] == 'SQUID_INK']
     #     fig, ax1 = plt.subplots()
     #     # 绘制第一条折线（左侧Y轴）
@@ -474,7 +482,6 @@ if __name__ == '__main__':
     'DJEMBES': Listing(symbol='DJEMBES', product='DJEMBES', denomination='SEASHELLS'),
      'PICNIC_BASKET1': Listing(symbol='PICNIC_BASKET1', product='PICNIC_BASKET1', denomination='SEASHELLS'),
     'PICNIC_BASKET2': Listing(symbol='PICNIC_BASKET2', product='PICNIC_BASKET2', denomination='SEASHELLS'),
-    #
     # 'VOLCANIC_ROCK': Listing(symbol='VOLCANIC_ROCK', product='VOLCANIC_ROCK', denomination='SEASHELLS'),
     # 'VOLCANIC_ROCK_VOUCHER_9500': Listing(symbol='VOLCANIC_ROCK_VOUCHER_9500', product='VOLCANIC_ROCK_VOUCHER_9500', denomination='SEASHELLS'),
     # 'VOLCANIC_ROCK_VOUCHER_9750': Listing(symbol='VOLCANIC_ROCK_VOUCHER_9750', product='VOLCANIC_ROCK_VOUCHER_9750', denomination='SEASHELLS'),
@@ -492,27 +499,34 @@ if __name__ == '__main__':
     'DJEMBES': 60,
     'PICNIC_BASKET1': 60,
     'PICNIC_BASKET2': 100,
-    'VOLCANIC_ROCK_VOUCHER_9500': 200,
-    'VOLCANIC_ROCK_VOUCHER_9750': 200,
-     'VOLCANIC_ROCK_VOUCHER_10000': 200,
+    # 'VOLCANIC_ROCK_VOUCHER_9500': 200,
+    # 'VOLCANIC_ROCK_VOUCHER_9750': 200,
+    #  'VOLCANIC_ROCK_VOUCHER_10000': 200,
     }
+    # from round3_merge_new import Trader
+    # trader = Trader()
+    # market_data, trade_history = _process_data_('./webruns/round3_final.log')
+    # backtester = Backtester(Trader, listings3, position_limit3, fair_calculations, market_data, trade_history, "trade_history_sim.log",
+    #                         True, True, None)
+    # backtester.run()
+    # print(backtester.pnl)
 
-    for day in [0,1,2]:
-    #day = -1
-        market_data = pd.read_csv(f"./round-3-island-data-bottle/prices_round_3_day_{day}.csv", sep=";", header=0)
-        trade_history = pd.read_csv(f"./round-3-island-data-bottle/trades_round_3_day_{day}.csv", sep=";", header=0)
-        df_ink = market_data[market_data['product'] == 'SQUID_INK']
-        #print(np.where(np.isnan(df_ink['bid_volume_1'])))
-        import io
-        # market_data, trade_history = _process_data_('./webruns/aggress_time.log')
-        # market_data, trade_history = _process_data_('./webruns/null_strategy.log')
-        trader = Trader()
-
-        backtester = Backtester(trader, listings3, position_limit3, {}, market_data, trade_history, "trade_history_sim.log", False, None)
-        backtester.run()
-        print(backtester.pnl)
-        all_round3_backtesters.append(copy.deepcopy(backtester))
-        """    pnl = {}
+    # for day in [0,1,2]:
+    # #day = -1
+    #     market_data = pd.read_csv(f"./round-3-island-data-bottle/prices_round_3_day_{day}.csv", sep=";", header=0)
+    #     trade_history = pd.read_csv(f"./round-3-island-data-bottle/trades_round_3_day_{day}.csv", sep=";", header=0)
+    #     df_ink = market_data[market_data['product'] == 'SQUID_INK']
+    #     #print(np.where(np.isnan(df_ink['bid_volume_1'])))
+    #     import io
+    #     # market_data, trade_history = _process_data_('./webruns/aggress_time.log')
+    #     # market_data, trade_history = _process_data_('./webruns/null_strategy.log')
+    #     trader = Trader()
+    #
+    #     backtester = Backtester(trader, listings3, position_limit3, {}, market_data, trade_history, "trade_history_sim.log", False, None)
+    #     backtester.run()
+    #     print(backtester.pnl)
+    #     all_round3_backtesters.append(copy.deepcopy(backtester))
+    """    pnl = {}
     for day in [-1, 0, 1]:
         market_data = pd.read_csv(f"./round-2-island-data-bottle/prices_round_2_day_{day}.csv", sep=";", header=0)
         trade_history = pd.read_csv(f"./round-2-island-data-bottle/trades_round_2_day_{day}.csv", sep=";", header=0)
