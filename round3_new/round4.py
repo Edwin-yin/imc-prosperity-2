@@ -91,27 +91,25 @@ PARAMS = {
     },
     
     Product.SPREAD1: {
-        "spread_ewm_alpha": 0,
-        "position_management_threshold": 20,
-        "default_spread_mean": 0, # 57 for round 3, 49 for round 2
-        # "default_spread_std": 40,
-        "spread_std_window": 45,
-        "spread_zscore_threshold": 5,
-        "spread_clear_zscore_threshold": 1,
-        "spread_zscore_full": 20,
+        "spread_ewm_alpha": 0.001,
+        "default_spread_mean": -125.5, # 57 for round 3, 49 for round 2
+        "default_spread_std": 43,
+        "spread_std_window": 100,
+        "spread_zscore_threshold": 1,
+        # "spread_clear_zscore_threshold": 1,
+        "spread_zscore_full": 2,
         "target_position": 41, # max 41
         "max_taking_levels": 3,
     },
     
     Product.SPREAD12: {
-        "spread_ewm_alpha": 0,
-        "default_spread_mean": 0, # 23 for round 3, 3 for round 2,
-        "position_management_threshold": 18,
-        # "default_spread_std": 40,
-        "spread_std_window": 45,
-        "spread_zscore_threshold": 5,
-        "spread_clear_zscore_threshold": 1,
-        "spread_zscore_full": 20,
+        "spread_ewm_alpha": 0.001,
+        "default_spread_mean": -419.4, # 23 for round 3, 3 for round 2,
+        "default_spread_std": 118,
+        "spread_std_window": 100,
+        "spread_zscore_threshold": 1,
+        # "spread_clear_zscore_threshold": 1,
+        "spread_zscore_full": 2,
         "target_position": 33, # max 30 for single pair; max 33 for two pairs
         "max_taking_levels": 3,
     },
@@ -352,18 +350,20 @@ class Trader:
         ink_fair_price = self.get_squidink_mid(order_depth, traderData)
         if ink_fair_price is None:
             return None, None
-        else:
-            traderData["price_history"].append(ink_fair_price)
+        traderData["price_history"].append(ink_fair_price)
+        # Update history data
         if len(traderData["price_history"]) <= self.params[product]['price_std_window']:
             traderData["price_mean"] += ink_fair_price / self.params[product]["price_std_window"]
             traderData["price_square_mean"] += (ink_fair_price ** 2) / self.params[product]["price_std_window"]
             return None, None
-
-        mean = traderData["price_mean"]
-        std = max(5e-5, math.sqrt(traderData["price_square_mean"] - traderData["price_mean"] ** 2))
         traderData["price_mean"] += (ink_fair_price - traderData["price_history"][0]) / self.params[product]["price_std_window"]
         traderData["price_square_mean"] += (ink_fair_price ** 2 - traderData["price_history"][0] ** 2) / self.params[product]["price_std_window"]
         traderData["price_history"].pop(0)
+        
+        # Calculate mean and std
+        mean = traderData["price_mean"]
+        std = max(5e-5, math.sqrt(traderData["price_square_mean"] - traderData["price_mean"] ** 2))
+        
         # Process sell orders (best ask)
         if len(order_depth.sell_orders) != 0:
             best_ask = min(order_depth.sell_orders.keys())
@@ -1069,34 +1069,33 @@ class Trader:
         synthetic_swmid, synthetic_best_bid, synthetic_best_ask = self.get_swmid(synthetic_order_depth)
         spread = basket_swmid - synthetic_swmid
        
-        if spread != np.nan:
-            spread_data["spread_history"].append(spread)
-        else:
+        if np.isnan(spread):
             return None
+        spread_data["spread_history"].append(spread)
         if (
             len(spread_data["spread_history"])
             <= self.params[spread_product]["spread_std_window"]
         ):  
-            spread_data["spread_ewm"] = spread_data["spread_ewm"] * (1 - self.params[spread_product]["spread_ewm_alpha"]) + spread * self.params[spread_product]["spread_ewm_alpha"]
-            spread_data["spread_mean"] += spread / self.params[spread_product]["spread_std_window"]
-            spread_data["spread_square_mean"] += spread ** 2 / self.params[spread_product]["spread_std_window"]
+            # spread_data["spread_mean"] += spread / self.params[spread_product]["spread_std_window"]
+            # spread_data["spread_square_mean"] += spread ** 2 / self.params[spread_product]["spread_std_window"]
             return None
-
-        spread_std = max(5e-5, math.sqrt(spread_data["spread_square_mean"] - spread_data["spread_mean"] ** 2)) if "default_spread_std" not in self.params[spread_product] else self.params[spread_product]["default_spread_std"]
-        spread_data["spread_mean"] += (spread - spread_data["spread_history"][0]) / self.params[spread_product]["spread_std_window"]
-        spread_data["spread_square_mean"] += (spread ** 2 - spread_data["spread_history"][0] ** 2) / self.params[spread_product]["spread_std_window"]
+        spread_data["spread_ewm"] = spread_data["spread_ewm"] * (1 - self.params[spread_product]["spread_ewm_alpha"]) + spread * self.params[spread_product]["spread_ewm_alpha"]
+        spread_data["spread_square_ewm"] = spread_data["spread_square_ewm"] * (1 - self.params[spread_product]["spread_ewm_alpha"]) + spread ** 2 * self.params[spread_product]["spread_ewm_alpha"]
         spread_data["spread_history"].pop(0)
-
+        # spread_data["spread_mean"] += (spread - spread_data["spread_history"][0]) / self.params[spread_product]["spread_std_window"]
+        # spread_data["spread_square_mean"] += (spread ** 2 - spread_data["spread_history"][0] ** 2) / self.params[spread_product]["spread_std_window"]
+        
         fair = spread_data["spread_ewm"]
+        spread_std = max(5e-5, math.sqrt(spread_data["spread_square_ewm"] - spread_data["spread_ewm"] ** 2)) 
+
         zscore = (
             spread - fair
         ) / spread_std
-        spread_data["spread_ewm"] = spread_data["spread_ewm"] * (1 - self.params[spread_product]["spread_ewm_alpha"]) + spread * self.params[spread_product]["spread_ewm_alpha"]
 
         # spread_data["prev_zscore"] = zscore
         if (basket_best_bid - synthetic_best_ask - fair) / spread_std >= self.params[spread_product]["spread_zscore_threshold"]:
             target_position = -round(self.params[spread_product]["target_position"] * min(1, (zscore - self.params[spread_product]["spread_zscore_threshold"]) / (self.params[spread_product]["spread_zscore_full"] - self.params[spread_product]["spread_zscore_threshold"])))
-            if basket_position > target_position or (target_position - basket_position) > self.params[spread_product]["position_management_threshold"]:
+            if basket_position > target_position:
                 return self.execute_spread_orders(
                     target_position,
                     basket_position,
@@ -1113,7 +1112,7 @@ class Trader:
 
         elif (basket_best_ask - synthetic_best_bid - fair) / spread_std <= -self.params[spread_product]["spread_zscore_threshold"]:
             target_position = round(self.params[spread_product]["target_position"] * min(1,  (self.params[spread_product]["spread_zscore_threshold"] - zscore) / (self.params[spread_product]["spread_zscore_full"] - self.params[spread_product]["spread_zscore_threshold"])))
-            if basket_position < target_position or (basket_position - target_position) > self.params[spread_product]["position_management_threshold"]:
+            if basket_position < target_position:
                 return self.execute_spread_orders(
                     target_position,
                     basket_position,
@@ -1127,34 +1126,34 @@ class Trader:
                     positions,
                     order_depths,
                 )
-        elif basket_position > 0 and (basket_best_bid - synthetic_best_ask - spread_data["spread_ewm"]) / spread_std >= self.params[spread_product]["spread_clear_zscore_threshold"]:
-            return self.execute_spread_orders(
-                    0,
-                    basket_position,
-                    basket_order_depth,
-                    synthetic_order_depth,
-                    basket_bid_take,
-                    basket_ask_take,
-                    synthetic_bid_take,
-                    synthetic_ask_take,
-                    product,
-                    positions,
-                    order_depths,
-                )
-        elif basket_position < 0 and (basket_best_ask - synthetic_best_bid - spread_data["spread_ewm"]) / spread_std <= -self.params[spread_product]["spread_zscore_threshold"]:
-            return self.execute_spread_orders(
-                    0,
-                    basket_position,
-                    basket_order_depth,
-                    synthetic_order_depth,
-                    basket_bid_take,
-                    basket_ask_take,
-                    synthetic_bid_take,
-                    synthetic_ask_take,
-                    product,
-                    positions,
-                    order_depths,
-                )
+        # elif basket_position > 0 and (basket_best_bid - synthetic_best_ask - spread_data["spread_ewm"]) / spread_std >= self.params[spread_product]["spread_clear_zscore_threshold"]:
+        #     return self.execute_spread_orders(
+        #             0,
+        #             basket_position,
+        #             basket_order_depth,
+        #             synthetic_order_depth,
+        #             basket_bid_take,
+        #             basket_ask_take,
+        #             synthetic_bid_take,
+        #             synthetic_ask_take,
+        #             product,
+        #             positions,
+        #             order_depths,
+        #         )
+        # elif basket_position < 0 and (basket_best_ask - synthetic_best_bid - spread_data["spread_ewm"]) / spread_std <= -self.params[spread_product]["spread_zscore_threshold"]:
+        #     return self.execute_spread_orders(
+        #             0,
+        #             basket_position,
+        #             basket_order_depth,
+        #             synthetic_order_depth,
+        #             basket_bid_take,
+        #             basket_ask_take,
+        #             synthetic_bid_take,
+        #             synthetic_ask_take,
+        #             product,
+        #             positions,
+        #             order_depths,
+        #         )
         return None
 
     def optimize_take_orders(self, products: List[str], result: Dict[str, List[Order]]) -> None:
@@ -1710,7 +1709,7 @@ class Trader:
             fair_vol = traderData["option_iv_mean"]
             std = max(5e-5, math.sqrt(traderData["option_iv_square_mean"] - traderData["option_iv_mean"] ** 2))
             # Update history if vol is not extreme value
-            if len(traderData["option_iv_history"]) < self.params[product]["option_iv_window"]:
+            if len(traderData["option_iv_history"]) <= self.params[product]["option_iv_window"]:
                 traderData["option_iv_history"].append(vol_curve[i])
                 traderData["option_iv_mean"] += vol_curve[i] / self.params[product]["option_iv_window"]
                 traderData["option_iv_square_mean"] += vol_curve[i] ** 2 / self.params[product]["option_iv_window"]
@@ -1853,10 +1852,11 @@ class Trader:
             )
             # if abs(resin_position) >= self.LIMIT[Product.RAINFOREST_RESIN]:
             #     print(f"Resin position limit reached at time {state.timestamp}. Current postiion: {resin_position}")
+            order_depths = state.order_depths.copy()
             resin_take_orders, buy_order_volume, sell_order_volume = (
                 self.take_orders(
                     Product.RAINFOREST_RESIN,
-                    state.order_depths[Product.RAINFOREST_RESIN],
+                    order_depths[Product.RAINFOREST_RESIN],
                     self.params[Product.RAINFOREST_RESIN]["fair_value"],
                     self.params[Product.RAINFOREST_RESIN]["take_width"],
                     resin_position,
@@ -1865,7 +1865,7 @@ class Trader:
             resin_clear_orders, buy_order_volume, sell_order_volume = (
                 self.clear_orders(
                     Product.RAINFOREST_RESIN,
-                    state.order_depths[Product.RAINFOREST_RESIN],
+                    order_depths[Product.RAINFOREST_RESIN],
                     self.params[Product.RAINFOREST_RESIN]["fair_value"],
                     self.params[Product.RAINFOREST_RESIN]["clear_width"],
                     resin_position,
@@ -1876,7 +1876,7 @@ class Trader:
             )
             resin_make_orders, _, _ = self.make_orders(
                 Product.RAINFOREST_RESIN,
-                state.order_depths[Product.RAINFOREST_RESIN],
+                order_depths[Product.RAINFOREST_RESIN],
                 self.params[Product.RAINFOREST_RESIN]["fair_value"],
                 resin_position,
                 buy_order_volume,
@@ -1905,11 +1905,11 @@ class Trader:
             )
             # if squidink_position >= self.LIMIT[Product.SQUID_INK]:
             #     print(f"Squidink position limit reached at {state.timestamp}. Current position: {squidink_position}")
-
+            order_depths = state.order_depths.copy()
             squidink_take_orders, buy_order_volume, sell_order_volume = (
                 self.take_orders_ink(
                     Product.SQUID_INK,
-                    state.order_depths[Product.SQUID_INK],
+                    order_depths[Product.SQUID_INK],
                     squidink_position,
                     self.params[Product.SQUID_INK]["prevent_adverse"],
                     self.params[Product.SQUID_INK]["adverse_volume"],
@@ -1941,10 +1941,11 @@ class Trader:
             
             if kelp_fair_value is not None:
                 # Take orders may have negative effect
+                order_depths = state.order_depths.copy()
                 kelp_take_orders, buy_order_volume, sell_order_volume = (
                     self.take_orders(
                         Product.KELP,
-                        state.order_depths[Product.KELP],
+                        order_depths[Product.KELP],
                         kelp_fair_value,
                         self.params[Product.KELP]["take_width"],
                         kelp_position,
@@ -1955,7 +1956,7 @@ class Trader:
                 kelp_clear_orders, buy_order_volume, sell_order_volume = (
                     self.clear_orders(
                         Product.KELP,
-                        state.order_depths[Product.KELP],
+                        order_depths[Product.KELP],
                         kelp_fair_value,
                         self.params[Product.KELP]["clear_width"],
                         kelp_position,
@@ -1966,7 +1967,7 @@ class Trader:
                 )
                 kelp_make_orders, _, _ = self.make_orders(
                     Product.KELP,
-                    state.order_depths[Product.KELP],
+                    order_depths[Product.KELP],
                     kelp_fair_value,
                     kelp_position,
                     buy_order_volume,
@@ -1981,134 +1982,135 @@ class Trader:
                     kelp_take_orders + kelp_clear_orders + kelp_make_orders
                 )
                 
-        # Spread orders
-        for product in [Product.BASKET1BY2, Product.PICNIC_BASKET1]:
-            spread_product = SPREAD[product]
-            if spread_product not in traderObject.keys():
-                traderObject[spread_product] = {
-                    "spread_history": [],
-                    "position": 0,
-                    "spread_mean": 0,
-                    "spread_square_mean": 0,
-                    "spread_ewm": self.params[spread_product]["default_spread_mean"],
-                    # "prev_zscore": 0,
-                    # "curr_avg": 0,
-                }
-            flag = True
-            for element in eval(f"{product}_WEIGHTS"):
-                if element not in state.order_depths.keys():
-                    flag = False
-                    break
-            for element in eval(f"{SYNTHETIC[product]}_WEIGHTS"):
-                if element not in state.order_depths.keys():
-                    flag = False
-                    break
-            if not flag:
-                continue
-            order_depths = state.order_depths.copy()
-            position = state.position.copy()
-            spread_orders = self.spread_orders(
-                order_depths,
-                position,
-                product,
-                traderObject[spread_product]["position"],
-                traderObject,
-                self.params[spread_product]["max_taking_levels"],
-            )
+        # # Spread orders
+        # for product in [Product.BASKET1BY2, Product.PICNIC_BASKET1]:
+        #     spread_product = SPREAD[product]
+        #     if spread_product not in traderObject.keys():
+        #         traderObject[spread_product] = {
+        #             "spread_history": [],
+        #             "position": 0,
+        #             # "spread_mean": 0,
+        #             # "spread_square_mean": 0,
+        #             "spread_ewm": self.params[spread_product]["default_spread_mean"],
+        #             "spread_square_ewm": self.params[spread_product]["default_spread_std"] ** 2 + self.params[spread_product]["default_spread_mean"] ** 2,
+        #             # "prev_zscore": 0,
+        #             # "curr_avg": 0,
+        #         }
+        #     flag = True
+        #     for element in eval(f"{product}_WEIGHTS"):
+        #         if element not in state.order_depths.keys():
+        #             flag = False
+        #             break
+        #     for element in eval(f"{SYNTHETIC[product]}_WEIGHTS"):
+        #         if element not in state.order_depths.keys():
+        #             flag = False
+        #             break
+        #     if not flag:
+        #         continue
+        #     order_depths = state.order_depths.copy()
+        #     position = state.position.copy()
+        #     spread_orders = self.spread_orders(
+        #         order_depths,
+        #         position,
+        #         product,
+        #         traderObject[spread_product]["position"],
+        #         traderObject,
+        #         self.params[spread_product]["max_taking_levels"],
+        #     )
         
-            if spread_orders is not None:
-                for p, order in spread_orders.items():
-                    if p not in result.keys():
-                        result[p] = []
-                    result[p].append(order)
+        #     if spread_orders is not None:
+        #         for p, order in spread_orders.items():
+        #             if p not in result.keys():
+        #                 result[p] = []
+        #             result[p].append(order)
                     
-                    # Track positions of trading pairs with shared component
-                    if p == Product.PICNIC_BASKET1:
-                        traderObject[spread_product]["position"] += order.quantity / eval(f'{SYNTHETIC[product]}_WEIGHTS')[p]
+        #             # Track positions of trading pairs with shared component
+        #             if p == Product.PICNIC_BASKET1:
+        #                 traderObject[spread_product]["position"] += order.quantity / eval(f'{SYNTHETIC[product]}_WEIGHTS')[p]
                                                                                          
                                     
-        # Optimize spread orders
-        self.optimize_take_orders(
-            [Product.DJEMBES, Product.PICNIC_BASKET1], result
-        )
+        # # Optimize spread orders
+        # self.optimize_take_orders(
+        #     [Product.DJEMBES, Product.PICNIC_BASKET1], result
+        # )
          
-        # Option trading
-        product = Product.VOLCANIC_ROCK
-        if product in self.params and product in state.order_depths and len(state.order_depths[product].buy_orders) > 0 and len(state.order_depths[product].sell_orders) > 0:
-            if product not in traderObject:
-                traderObject[product] = {
-                    "option_base_iv": self.params[product]["default_base_iv"] + self.params["day"] * self.params[product]["base_iv_decay"],
-                    "theoretical_option_base_iv": self.params[product]["default_base_iv"] + self.params["day"] * self.params[product]["base_iv_decay"],
-                    "option_parabolic_coef": self.params[product]["default_parabolic_coef"],
-                    # "option_base_iv_beta": self.params[product]["option_base_iv_beta"],
-                    # "option_parabolic_coef_beta": self.params[product]["option_parabolic_coef_beta"],
-                    # "option_base_iv_history": [],
-                }
+        # # Option trading
+        # product = Product.VOLCANIC_ROCK
+        # if product in self.params and product in state.order_depths and len(state.order_depths[product].buy_orders) > 0 and len(state.order_depths[product].sell_orders) > 0:
+        #     if product not in traderObject:
+        #         traderObject[product] = {
+        #             "option_base_iv": self.params[product]["default_base_iv"] + self.params["day"] * self.params[product]["base_iv_decay"],
+        #             "theoretical_option_base_iv": self.params[product]["default_base_iv"] + self.params["day"] * self.params[product]["base_iv_decay"],
+        #             "option_parabolic_coef": self.params[product]["default_parabolic_coef"],
+        #             # "option_base_iv_beta": self.params[product]["option_base_iv_beta"],
+        #             # "option_parabolic_coef_beta": self.params[product]["option_parabolic_coef_beta"],
+        #             # "option_base_iv_history": [],
+        #         }
             
-            theoretical_base_iv = traderObject[product]["theoretical_option_base_iv"] + state.timestamp / 1000000 * self.params[product]["base_iv_decay"]        
-            tte = self.params[product]["tte"] - (self.params["day"] + state.timestamp / 1000000) / 250
-            spot_price = (
-                        min(state.order_depths[product].buy_orders.keys())
-                        + max(state.order_depths[product].sell_orders.keys())
-                    ) / 2
+        #     theoretical_base_iv = traderObject[product]["theoretical_option_base_iv"] + state.timestamp / 1000000 * self.params[product]["base_iv_decay"]        
+        #     tte = self.params[product]["tte"] - (self.params["day"] + state.timestamp / 1000000) / 250
+        #     spot_price = (
+        #                 min(state.order_depths[product].buy_orders.keys())
+        #                 + max(state.order_depths[product].sell_orders.keys())
+        #             ) / 2
             
-            for strike in STRIKES:
-                option = f"{product}_VOUCHER_{strike}"
-                if option not in traderObject:
-                    traderObject[option] = {
-                        "option_prev_price": 0,
-                        "option_prev_vol": -1,
-                        "option_iv_history": [],
-                        "option_iv_mean": 0,
-                        "option_iv_square_mean": 0,
-                    }
+        #     for strike in STRIKES:
+        #         option = f"{product}_VOUCHER_{strike}"
+        #         if option not in traderObject:
+        #             traderObject[option] = {
+        #                 "option_prev_price": 0,
+        #                 "option_prev_vol": -1,
+        #                 "option_iv_history": [],
+        #                 "option_iv_mean": 0,
+        #                 "option_iv_square_mean": 0,
+        #             }
                     
-            vol_curve = self.get_vol_curve(tte, spot_price, state.order_depths, traderObject, product) 
-            # ask_vol_curve = self.get_ask_vol_curve(tte, spot_price, state.order_depths, product)
-            # bid_vol_curve = self.get_bid_vol_curve(tte, spot_price, state.order_depths, product)
-            predicted_delta = self.predict_option_delta(tte, spot_price, vol_curve, traderObject)
-            predicted_vega = self.predict_option_vega(tte, spot_price, vol_curve, traderObject)
-            # predicted_prices = self.predict_option_prices(tte, spot_price, vol_curve)
-            option_positions = np.array([state.position[f"{product}_VOUCHER_{strike}"] if f"{product}_VOUCHER_{strike}" in state.position else 0 for strike in STRIKES])
+        #     vol_curve = self.get_vol_curve(tte, spot_price, state.order_depths, traderObject, product) 
+        #     # ask_vol_curve = self.get_ask_vol_curve(tte, spot_price, state.order_depths, product)
+        #     # bid_vol_curve = self.get_bid_vol_curve(tte, spot_price, state.order_depths, product)
+        #     predicted_delta = self.predict_option_delta(tte, spot_price, vol_curve, traderObject)
+        #     predicted_vega = self.predict_option_vega(tte, spot_price, vol_curve, traderObject)
+        #     # predicted_prices = self.predict_option_prices(tte, spot_price, vol_curve)
+        #     option_positions = np.array([state.position[f"{product}_VOUCHER_{strike}"] if f"{product}_VOUCHER_{strike}" in state.position else 0 for strike in STRIKES])
 
-            current_delta = np.dot(predicted_delta, option_positions)
-            # Don't trade options with too low vega
-            trade_mask = (predicted_vega > self.params[product]["option_vega_threshold"])
-            # Calculate zscore and set arbitrage orders
-            take_orders, make_orders, current_delta = self.option_orders(
-                state.order_depths,
-                tte,
-                spot_price,
-                theoretical_base_iv,
-                current_delta,
-                option_positions[trade_mask],
-                predicted_delta[trade_mask],
-                traderObject,
-                vol_curve[trade_mask],
-                product,
-                [strike for i, strike in enumerate(STRIKES) if trade_mask[i]],
-            )
-            for i, (take_order, make_order) in enumerate(zip(take_orders, make_orders)):
-                if len(take_order) > 0 or len(make_order) > 0:
-                    option = f"{product}_VOUCHER_{STRIKES[i]}"
-                    result[option] = (
-                        take_order + make_order
-                    )
+        #     current_delta = np.dot(predicted_delta, option_positions)
+        #     # Don't trade options with too low vega
+        #     trade_mask = (predicted_vega > self.params[product]["option_vega_threshold"])
+        #     # Calculate zscore and set arbitrage orders
+        #     take_orders, make_orders, current_delta = self.option_orders(
+        #         state.order_depths,
+        #         tte,
+        #         spot_price,
+        #         theoretical_base_iv,
+        #         current_delta,
+        #         option_positions[trade_mask],
+        #         predicted_delta[trade_mask],
+        #         traderObject,
+        #         vol_curve[trade_mask],
+        #         product,
+        #         [strike for i, strike in enumerate(STRIKES) if trade_mask[i]],
+        #     )
+        #     for i, (take_order, make_order) in enumerate(zip(take_orders, make_orders)):
+        #         if len(take_order) > 0 or len(make_order) > 0:
+        #             option = f"{product}_VOUCHER_{STRIKES[i]}"
+        #             result[option] = (
+        #                 take_order + make_order
+        #             )
                     
                             
-            # Use spot and options not being traded to hedge
-            spot_orders = self.hedge(
-                state.order_depths,
-                state.position,
-                current_delta,
-                predicted_delta[~trade_mask],
-                product,
-                [strike for i, strike in enumerate(STRIKES) if not trade_mask[i]],
-            )
-            if len(spot_orders) > 0:
-                result[product] = spot_orders
-                # print(f"Spot: {result[product]}")
-                # print(f"Current Delta after hedging: {current_delta + sum(order.quantity for order in spot_orders) + state.position.get(product, 0)}")
+        #     # Use spot and options not being traded to hedge
+        #     spot_orders = self.hedge(
+        #         state.order_depths,
+        #         state.position,
+        #         current_delta,
+        #         predicted_delta[~trade_mask],
+        #         product,
+        #         [strike for i, strike in enumerate(STRIKES) if not trade_mask[i]],
+        #     )
+        #     if len(spot_orders) > 0:
+        #         result[product] = spot_orders
+        #         # print(f"Spot: {result[product]}")
+        #         # print(f"Current Delta after hedging: {current_delta + sum(order.quantity for order in spot_orders) + state.position.get(product, 0)}")
                        
             
         conversions = 1

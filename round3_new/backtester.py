@@ -120,7 +120,7 @@ class Backtester:
                 order_depths_pnl = self._construct_order_depths(group)
 
                 state = self._construct_trading_state(traderData, timestamp, self.listings, order_depths,
-                                     dict(own_trades), dict(market_trades), self.current_position, self.observations)
+                                     dict(own_trades), dict(market_trades), self.current_position.copy(), self.observations)
 
                 orders, conversions, traderData = self.trader.run(state)
 
@@ -427,7 +427,7 @@ if __name__ == '__main__':
     # run
     pnl = {}
     pnl_history = {}
-    for day in [0, 1, 2, 3]:
+    for day in [0, 1, 2, 3, 4]:
         market_data = pd.read_csv(f"./round-3-island-data-bottle/prices_round_3_day_{day}.csv", sep=";", header=0)
         trade_history = pd.read_csv(f"./round-3-island-data-bottle/trades_round_3_day_{day}.csv", sep=";", header=0)
 
