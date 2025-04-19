@@ -350,7 +350,7 @@ class Backtester:
 
 
 if __name__ == '__main__':
-    from round3_option_naive import Trader
+    from round4 import Trader
 
     def calculate_SQUID_INK_fair(order_depth):
         # assumes order_depth has orders in it
@@ -383,6 +383,8 @@ if __name__ == '__main__':
         'VOLCANIC_ROCK_VOUCHER_10000': Listing(symbol='VOLCANIC_ROCK_VOUCHER_10000', product='VOLCANIC_ROCK_VOUCHER_10000', denomination='SEASHELLS'),
         'VOLCANIC_ROCK_VOUCHER_10250': Listing(symbol='VOLCANIC_ROCK_VOUCHER_10250', product='VOLCANIC_ROCK_VOUCHER_10250', denomination='SEASHELLS'),
         'VOLCANIC_ROCK_VOUCHER_10500': Listing(symbol='VOLCANIC_ROCK_VOUCHER_10500', product='VOLCANIC_ROCK_VOUCHER_10500', denomination='SEASHELLS'),
+        
+        'MAGNIFICENT_MACARONS': Listing(symbol='MAGNIFICENT_MACARONS', product='MAGNIFICENT_MACARONS', denomination='SEASHELLS'),
     }
 
     position_limit = {
@@ -400,6 +402,7 @@ if __name__ == '__main__':
         'VOLCANIC_ROCK_VOUCHER_10250': 200,
         'VOLCANIC_ROCK_VOUCHER_10500': 200,
         'VOLCANIC_ROCK': 400, 
+        'MAGNIFICENT_MACARONS': 75,
     }
 
     fair_calculations = {
@@ -424,7 +427,7 @@ if __name__ == '__main__':
     # run
     pnl = {}
     pnl_history = {}
-    for day in [0, 1, 2]:
+    for day in [0, 1, 2, 3]:
         market_data = pd.read_csv(f"./round-3-island-data-bottle/prices_round_3_day_{day}.csv", sep=";", header=0)
         trade_history = pd.read_csv(f"./round-3-island-data-bottle/trades_round_3_day_{day}.csv", sep=";", header=0)
 
