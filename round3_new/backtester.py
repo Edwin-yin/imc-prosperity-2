@@ -350,7 +350,7 @@ class Backtester:
 
 
 if __name__ == '__main__':
-    from round4 import Trader
+    from round4_ewma import Trader
 
     def calculate_SQUID_INK_fair(order_depth):
         # assumes order_depth has orders in it
@@ -427,7 +427,7 @@ if __name__ == '__main__':
     # run
     pnl = {}
     pnl_history = {}
-    for day in [0, 1, 2, 3, 4]:
+    for day in [-2, -1, 0, 1, 2, 3, 4]:
         market_data = pd.read_csv(f"./round-3-island-data-bottle/prices_round_3_day_{day}.csv", sep=";", header=0)
         trade_history = pd.read_csv(f"./round-3-island-data-bottle/trades_round_3_day_{day}.csv", sep=";", header=0)
 
