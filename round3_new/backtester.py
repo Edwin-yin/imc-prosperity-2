@@ -6,6 +6,16 @@ from collections import defaultdict
 import numpy as np
 from datamodel import TradingState, Listing, OrderDepth, Trade, Observation, Order, UserId
 
+class ConversionObservation:
+    def __init__(self, symbol: str, implied_bid: float, implied_ask: float):
+        self.conversionObservations = {symbol: Observation(implied_bid, implied_ask)}
+    
+class Observation:
+    def __init__(self, implied_bid: float, implied_ask: float):
+        self.implied_bid = implied_bid
+        self.implied_ask = implied_ask
+        self.askPrice = implied_ask
+        self.bidPrice = implied_bid
 
 class Backtester:
     def __init__(self, trader, listings: Dict[str, Listing], position_limit: Dict[str, int], fair_marks, 
