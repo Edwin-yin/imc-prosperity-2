@@ -1218,7 +1218,7 @@ class Trader:
                 )
 
         elif (basket_best_ask - synthetic_best_bid - fair) / spread_std <= -self.params[spread_product]["spread_zscore_threshold"]:
-            target_position = round(self.params[spread_product]["target_position"] * min(1,  (self.params[spread_product]["spread_zscore_threshold"] - zscore) / (self.params[spread_product]["spread_zscore_full"] - self.params[spread_product]["spread_zscore_threshold"])))
+            target_position = round(self.params[spread_product]["target_position"] * min(1,  (-self.params[spread_product]["spread_zscore_threshold"] - zscore) / (self.params[spread_product]["spread_zscore_full"] - self.params[spread_product]["spread_zscore_threshold"])))
             if basket_position < target_position:
                 return self.execute_spread_orders(
                     target_position,

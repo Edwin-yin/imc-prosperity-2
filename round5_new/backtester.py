@@ -1,25 +1,14 @@
 import copy
-from typing import Dict, List, Any
+from typing import Dict, List, Any, Union
 import pandas as pd
 import json
 from collections import defaultdict
 import numpy as np
-from datamodel import TradingState, Listing, OrderDepth, Trade, Observation, Order, UserId
-
-class ConversionObservation:
-    def __init__(self, symbol: str, implied_bid: float, implied_ask: float):
-        self.conversionObservations = {symbol: Observation(implied_bid, implied_ask)}
+from datamodel import TradingState, Listing, OrderDepth, Trade, Observation, ConversionObservation, Order, UserId
     
-class Observation:
-    def __init__(self, implied_bid: float, implied_ask: float):
-        self.implied_bid = implied_bid
-        self.implied_ask = implied_ask
-        self.askPrice = implied_ask
-        self.bidPrice = implied_bid
-
 class Backtester:
     def __init__(self, trader, listings: Dict[str, Listing], position_limit: Dict[str, int], fair_marks, 
-                 market_data: pd.DataFrame, trade_history: pd.DataFrame, file_name: str = None,
+                 market_data: pd.DataFrame, trade_history: pd.DataFrame, observation_data: Union[None, pd.DataFrame] = None,file_name: str = None,
                  do_verification: bool =False, output_fair: str = None):
         self.trader = trader
         self.listings = listings
@@ -29,13 +18,14 @@ class Backtester:
         self.trade_history = trade_history.sort_values(by=['timestamp', 'symbol'])
         self.file_name = file_name
 
-        self.observations = [Observation({}, {}) for _ in range(len(market_data))]
+        self.observations = observation_data
 
         self.current_position = {product: 0 for product in self.listings.keys()}
         self.pnl_history = {product: [] for product in self.listings.keys()}
         self.pnl = {product: 0 for product in self.listings.keys()}
         self.cash = {product: 0 for product in self.listings.keys()}
         self.trades = []
+    
         self.sandbox_logs = []
         self.do_verification = do_verification
         self.output_fair = output_fair
@@ -120,17 +110,27 @@ class Backtester:
 
                 # self._add_trades(own_trades, market_trades)
         else:
+            own_trades = defaultdict(list)
+            market_trades = defaultdict(list)
             for timestamp, group in timestamp_group_md:
-                own_trades = defaultdict(list)
-                market_trades = defaultdict(list)
+                    
                 pnl_product = defaultdict(float)
 
                 order_depths = self._construct_order_depths(group)
                 order_depths_matching = self._construct_order_depths(group)
                 order_depths_pnl = self._construct_order_depths(group)
-
+                if self.observations is not None: 
+                    now_observation_df = self.observations[self.observations['timestamp'] == timestamp]
+                    conv_observation = ConversionObservation(
+                        now_observation_df['bidPrice'].values[0], now_observation_df['askPrice'].values[0],
+                        now_observation_df['transportFees'].values[0], now_observation_df['exportTariff'].values[0],
+                        now_observation_df['importTariff'].values[0], now_observation_df['sunlightIndex'].values[0],
+                        now_observation_df['sugarPrice'].values[0])
+                    now_observation = Observation({}, {'MAGNIFICENT_MACARONS': conv_observation})
+                else:
+                    now_observation = None
                 state = self._construct_trading_state(traderData, timestamp, self.listings, order_depths,
-                                     dict(own_trades), dict(market_trades), self.current_position.copy(), self.observations)
+                                     dict(own_trades), dict(market_trades), self.current_position.copy(), now_observation)
 
                 orders, conversions, traderData = self.trader.run(state)
 
@@ -164,14 +164,15 @@ class Backtester:
                     self.pnl_history[product].append(self.pnl[product])
 
                 self._add_trades(own_trades, market_trades)
+                if timestamp % 100000 == 0:
+                    print(f"Timestamp: {timestamp}, PnL: {self.pnl}")
         return self._log_trades(self.file_name)
     
     
     def _log_trades(self, filename: str = None):
         if filename is None:
             return 
-        # FIXME: profit and loss has not been calculated yet
-        # self.market_data['profit_and_loss'] = self.pnl_history
+        self.market_data['profit_and_loss'] = self.pnl_history
 
         output = ""
         output += "Sandbox logs:\n"
@@ -264,7 +265,7 @@ class Backtester:
             if trade.symbol == order.symbol:
                 if trade.price < order.price:
                     trade_volume = min(abs(order.quantity), abs(trade.quantity))
-                    trades.append(Trade(order.symbol, order.price, trade_volume, "SUBMISSION", "", timestamp))
+                    trades.append(Trade(order.symbol, order.price, trade_volume, "SUBMISSION", trade.seller, timestamp))
                     order.quantity -= trade_volume
                     position[order.symbol] += trade_volume
                     self.cash[order.symbol] -= order.price * trade_volume
@@ -272,7 +273,7 @@ class Backtester:
                         continue
                     else:
                         new_quantity = trade.quantity - trade_volume
-                        new_trades_at_timestamp.append(Trade(order.symbol, order.price, new_quantity, "", "", timestamp))
+                        new_trades_at_timestamp.append(Trade(order.symbol, order.price, new_quantity, trade.buyer, trade.seller, timestamp))
                         continue
             new_trades_at_timestamp.append(trade)  
 
@@ -310,7 +311,7 @@ class Backtester:
             if trade.symbol == order.symbol:
                 if trade.price > order.price:
                     trade_volume = min(abs(order.quantity), abs(trade.quantity))
-                    trades.append(Trade(order.symbol, order.price, trade_volume, "", "SUBMISSION", timestamp))
+                    trades.append(Trade(order.symbol, order.price, trade_volume, trade.buyer, "SUBMISSION", timestamp))
                     order.quantity += trade_volume
                     position[order.symbol] -= trade_volume
                     self.cash[order.symbol] += order.price * trade_volume
@@ -318,7 +319,7 @@ class Backtester:
                         continue
                     else:
                         new_quantity = trade.quantity - trade_volume
-                        new_trades_at_timestamp.append(Trade(order.symbol, order.price, new_quantity, "", "", timestamp))
+                        new_trades_at_timestamp.append(Trade(order.symbol, order.price, new_quantity, trade.buyer, trade.seller, timestamp))
                         continue
             new_trades_at_timestamp.append(trade)  
 
@@ -360,7 +361,7 @@ class Backtester:
 
 
 if __name__ == '__main__':
-    from round4_ewma import Trader
+    from round5_option_maker import Trader
 
     def calculate_SQUID_INK_fair(order_depth):
         # assumes order_depth has orders in it
@@ -420,6 +421,7 @@ if __name__ == '__main__':
         "SQUID_INK": calculate_SQUID_INK_fair
     }
     import io
+    import os
     def _process_data_(file):
         with open(file, 'r') as file:
             log_content = file.read()
@@ -437,13 +439,33 @@ if __name__ == '__main__':
     # run
     pnl = {}
     pnl_history = {}
-    for day in [-2, -1, 0, 1, 2, 3, 4]:
+    # market_data, trade_history = _process_data_('./round-5-island-data-bottle/null_trades.log')
+    # market_data.to_csv('./round-5-island-data-bottle/prices_round_5_online.csv', index=False, sep=";")
+    # trade_history.to_csv('./round-5-island-data-bottle/trades_round_5_online.csv', index=False, sep=";")
+    # trader = Trader()
+    # day = 5
+    # trader.params['day'] = day # Set only in offline backtester.
+    # backtester = Backtester(trader, listings, position_limit, fair_calculations, market_data, trade_history, None,
+    #                         f"trade_history_sim_online.log")
+    # backtester.run()
+    # pnl[day] = backtester.pnl
+    # pnl_history[day] = backtester.pnl_history
+    # # Save the pnl history
+    # with open(f"pnl_history_day_{day}.json", "w") as file:
+    #     json.dump(pnl_history[day], file, indent=2)
+    # print(f"Day {day} completed.")
+    # print(pnl[day])
+    
+    for day in [2, 3, 4]:
         market_data = pd.read_csv(f"./round-5-island-data-bottle/prices_round_5_day_{day}.csv", sep=";", header=0)
         trade_history = pd.read_csv(f"./round-5-island-data-bottle/trades_round_5_day_{day}.csv", sep=";", header=0)
-
+        if os.path.exists(f"./round-5-island-data-bottle/observations_round_5_day_{day}.csv"):
+            market_observe = pd.read_csv(f"./round-5-island-data-bottle/observations_round_5_day_{day}.csv", sep=",", header=0)
+        else:
+            market_observe = None
         trader = Trader()
         trader.params['day'] = day # Set only in offline backtester.
-        backtester = Backtester(trader, listings, position_limit, fair_calculations, market_data, trade_history,
+        backtester = Backtester(trader, listings, position_limit, fair_calculations, market_data, trade_history, market_observe,
                                 f"trade_history_sim_day_{day}.log")
         backtester.run()
         pnl[day] = backtester.pnl
@@ -457,3 +479,112 @@ if __name__ == '__main__':
         print(f"Day {k}: {v}")
         print(f"Arbitrage pnl: {v['PICNIC_BASKET2'] + v['PICNIC_BASKET1'] + v['DJEMBES'] + v['CROISSANTS'] + v['JAMS']}")
         print(f"Option pnl: {v['VOLCANIC_ROCK'] + v['VOLCANIC_ROCK_VOUCHER_9500'] + v['VOLCANIC_ROCK_VOUCHER_9750'] + v['VOLCANIC_ROCK_VOUCHER_10000']+ v['VOLCANIC_ROCK_VOUCHER_10250'] + v['VOLCANIC_ROCK_VOUCHER_10500']}")
+
+    # market_data, trade_history = _process_data_('./logs/roun1_0.log')
+    # run
+    
+    #     trader = Trader()
+    #     backtester = Backtester(trader, listings, position_limit, fair_calculations, market_data, trade_history,
+    #                             market_observe,
+    #                             "trade_history_sim.log", False, False, None)
+    #     backtester.run()
+    #     print(backtester.pnl)
+    #     df_ink = market_data[market_data['product'] == 'MAGNIFICENT_MACARONS']
+    #     fig, ax1 = plt.subplots()
+    #     # 绘制第一条折线（左侧Y轴）
+    #     max_pnl = max(backtester.pnl_history['MAGNIFICENT_MACARONS'])
+    #     color = 'tab:blue'
+    #     ax1.set_xlabel('Time')
+    #     ax1.set_ylabel('pnl', color=color)
+    #     ax1.plot(df_ink['timestamp'] / 100, np.array(backtester.pnl_history['MAGNIFICENT_MACARONS'])*50/max_pnl, color=color, marker='o',linestyle='-')
+    #     ax1.tick_params(axis='y', labelcolor=color)
+
+    #     # 创建第二个Y轴
+    #     ax2 = ax1.twinx()
+    #     color = 'tab:red'
+    #     ax2.set_ylabel('pos', color=color)
+    #     ax2.plot(df_ink['timestamp'] / 100, np.array(backtester.position_history['MAGNIFICENT_MACARONS']), color=color, linestyle='-', marker='s')
+    #     ax2.tick_params(axis='y', labelcolor=color)
+
+    #     # 创建第二个Y轴
+    #     ax3 = ax1.twinx()
+    #     color = 'tab:green'
+    #     ax3.set_ylabel('price', color=color)
+    #     ax3.plot(df_ink['timestamp'] / 100, np.array(df_ink['mid_price'])*50/np.nanmax(df_ink['mid_price']), color=color, linestyle='-',
+    #              marker='^')
+    #     ax3.tick_params(axis='y', labelcolor=color)
+
+    #     # 显示网格
+    #     plt.grid(True)
+
+    #     # 显示图形
+    #     plt.show()
+
+    # all_round3_backtesters = []
+    # listings3 = {
+    #     'RAINFOREST_RESIN': Listing(symbol='RAINFOREST_RESIN', product='RAINFOREST_RESIN', denomination='SEASHELLS'),
+    #     'SQUID_INK': Listing(symbol='SQUID_INK', product='SQUID_INK', denomination='SEASHELLS'),
+    #     'KELP': Listing(symbol='KELP', product='KELP', denomination='SEASHELLS'),
+    #     'CROISSANTS': Listing(symbol='CROISSANTS', product='CROISSANTS', denomination='SEASHELLS'),
+    #     'JAMS': Listing(symbol='JAMS', product='JAMS', denomination='SEASHELLS'),
+    #     'DJEMBES': Listing(symbol='DJEMBES', product='DJEMBES', denomination='SEASHELLS'),
+    #     'PICNIC_BASKET1': Listing(symbol='PICNIC_BASKET1', product='PICNIC_BASKET1', denomination='SEASHELLS'),
+    #     'PICNIC_BASKET2': Listing(symbol='PICNIC_BASKET2', product='PICNIC_BASKET2', denomination='SEASHELLS'),
+    #     # 'VOLCANIC_ROCK': Listing(symbol='VOLCANIC_ROCK', product='VOLCANIC_ROCK', denomination='SEASHELLS'),
+    #     # 'VOLCANIC_ROCK_VOUCHER_9500': Listing(symbol='VOLCANIC_ROCK_VOUCHER_9500', product='VOLCANIC_ROCK_VOUCHER_9500', denomination='SEASHELLS'),
+    #     # 'VOLCANIC_ROCK_VOUCHER_9750': Listing(symbol='VOLCANIC_ROCK_VOUCHER_9750', product='VOLCANIC_ROCK_VOUCHER_9750', denomination='SEASHELLS'),
+    #     #  'VOLCANIC_ROCK_VOUCHER_10000': Listing(symbol='VOLCANIC_ROCK_VOUCHER_10000', product='VOLCANIC_ROCK_VOUCHER_10000', denomination='SEASHELLS'),
+    #     #  'VOLCANIC_ROCK_VOUCHER_10250': Listing(symbol='VOLCANIC_ROCK_VOUCHER_10250', product='VOLCANIC_ROCK_VOUCHER_10250', denomination='SEASHELLS'),
+    #     #  'VOLCANIC_ROCK_VOUCHER_10500': Listing(symbol='VOLCANIC_ROCK_VOUCHER_10500', product='VOLCANIC_ROCK_VOUCHER_10500', denomination='SEASHELLS'),
+    #     }
+
+    # position_limit3 = {
+    #     'RAINFOREST_RESIN': 50,
+    #     'SQUID_INK': 50,
+    #     'KELP': 50,
+    #     'CROISSANTS': 250,
+    #     'JAMS': 350,
+    #     'DJEMBES': 60,
+    #     'PICNIC_BASKET1': 60,
+    #     'PICNIC_BASKET2': 100,
+        # 'VOLCANIC_ROCK_VOUCHER_9500': 200,
+        # 'VOLCANIC_ROCK_VOUCHER_9750': 200,
+        #  'VOLCANIC_ROCK_VOUCHER_10000': 200,
+    # }
+    # from round3_merge_new import Trader
+    # trader = Trader()
+    # market_data, trade_history = _process_data_('./webruns/round3_final.log')
+    # backtester = Backtester(Trader, listings3, position_limit3, fair_calculations, market_data, trade_history, "trade_history_sim.log",
+    #                         True, True, None)
+    # backtester.run()
+    # print(backtester.pnl)
+
+    # for day in [0,1,2]:
+    # #day = -1
+    #     market_data = pd.read_csv(f"./round-3-island-data-bottle/prices_round_3_day_{day}.csv", sep=";", header=0)
+    #     trade_history = pd.read_csv(f"./round-3-island-data-bottle/trades_round_3_day_{day}.csv", sep=";", header=0)
+    #     df_ink = market_data[market_data['product'] == 'SQUID_INK']
+    #     #print(np.where(np.isnan(df_ink['bid_volume_1'])))
+    #     import io
+    #     # market_data, trade_history = _process_data_('./webruns/aggress_time.log')
+    #     # market_data, trade_history = _process_data_('./webruns/null_strategy.log')
+    #     trader = Trader()
+    #
+    #     backtester = Backtester(trader, listings3, position_limit3, {}, market_data, trade_history, "trade_history_sim.log", False, None)
+    #     backtester.run()
+    #     print(backtester.pnl)
+    #     all_round3_backtesters.append(copy.deepcopy(backtester))
+    """    pnl = {}
+    for day in [-1, 0, 1]:
+        market_data = pd.read_csv(f"./round-2-island-data-bottle/prices_round_2_day_{day}.csv", sep=";", header=0)
+        trade_history = pd.read_csv(f"./round-2-island-data-bottle/trades_round_2_day_{day}.csv", sep=";", header=0)
+
+        trader = Trader()
+        backtester = Backtester(trader, listings, position_limit, fair_calculations, market_data, trade_history,
+                                "trade_history_sim.log")
+        backtester.run()
+        pnl[day] = backtester.pnl
+    for k, v in pnl.items():
+        print(f"Day {k}: {v}")
+        print(f"Arbitrage pnl: {v['PICNIC_BASKET2'] + v['PICNIC_BASKET1'] + v['DJEMBES']}")
+        """
